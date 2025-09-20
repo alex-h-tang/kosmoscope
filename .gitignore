@@ -1,1 +1,32 @@
 .venv
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Builds / tooling
+dist/
+build/
+.out/
+.next/
+.cache/
+.terraform/
+.turbo/
+coverage/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.log
+
+# Editors/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

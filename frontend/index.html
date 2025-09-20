@@ -2,15 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" >
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
-    >
-    <title>Earth • Sun • Moon (Three.js)</title>
-    <link rel="stylesheet" href="/styles.css" >
+    <meta name="viewport" content="width=device-width, initial-scale=1" >
+    <title>Earth (Three.js)</title>
+    <style>
+      html, body { margin:0; height:100%; background:#fff; }
+      #scene { width:100%; height:100%; display:block; background:#fff; }
+    </style>
   </head>
   <body>
     <canvas id="scene"></canvas>
+    <img class="overlay" src="/overlays/earth_overlay.png" alt="overlay" >
+
     <script type="module" src="/main.js"></script>
   </body>
 </html>

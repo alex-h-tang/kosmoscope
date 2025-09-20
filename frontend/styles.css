@@ -4,8 +4,13 @@ html, body {
   background: radial-gradient(ellipse at top, #0a0a12, #000 65%);
   overflow: hidden;
 }
-#scene {
-  width: 100%;
-  height: 100%;
-  display: block;
+#scene { width:100%; height:100%; display:block; }
+img.overlay {
+  position: fixed;     /* stays put on screen */
+  top: 12px;
+  right: 12px;
+  width: 240px;        /* adjust */
+  opacity: 0.95;       /* adjust */
+  pointer-events: none;/* don't block mouse on canvas */
 }
+

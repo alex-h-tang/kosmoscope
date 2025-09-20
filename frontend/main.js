@@ -24,10 +24,10 @@ controls.minDistance = 3;
 controls.maxDistance = 30;
 
 // ---------- Lights ----------
-const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+const ambient = new THREE.AmbientLight(0xffffff, 0.15);
 scene.add(ambient);
 
-const sun = new THREE.DirectionalLight(0xffffff, 1.3);
+const sun = new THREE.DirectionalLight(0xffffff, 5);
 sun.position.set(10, 8, 6);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
@@ -69,13 +69,33 @@ const sunMesh = new THREE.Mesh(sunGeo, sunMat);
 sunMesh.position.copy(sun.position);
 scene.add(sunMesh);
 
-// --- Moon (simple gray sphere) ---
-const moonRadius = 0.54;          // relative to Earth radius=2
-const moonDistance = 5.0;         // distance from Earth center (scene units)
+// --- Moon (textured) ---
+const moonRadius   = 0.54;  // relative to Earth radius=2
+const moonDistance = 5.0;   // distance from Earth center (scene units)
+
+// Load equirectangular color texture
+const moonTex = texLoader.load(
+  '/overlays/moon.jpg',
+  (t) => {
+    t.colorSpace = THREE.SRGBColorSpace;                         // correct color
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();     // sharper at grazing angles
+    // SphereGeometry already has equirectangular UVs; no extra mapping needed
+  },
+  undefined,
+  (err) => console.error('Failed to load /overlays/moon.jpg', err)
+);
+
+// (Optional) use the same image as a gentle bump map for relief
+const moonMat = new THREE.MeshPhongMaterial({
+  map: moonTex,
+  bumpMap: moonTex,
+  bumpScale: 0.025,            // tweak 0.015–0.05 to taste
+  specular: 0x111111,          // very low specular—moon is matte
+  shininess: 5
+});
 
 const moonGeo = new THREE.SphereGeometry(moonRadius, 64, 64);
-const moonMat = new THREE.MeshPhongMaterial({ color: 0xcccccc });
-const moon = new THREE.Mesh(moonGeo, moonMat);
+const moon    = new THREE.Mesh(moonGeo, moonMat);
 moon.castShadow = true;
 moon.receiveShadow = true;
 
@@ -251,17 +271,60 @@ const MEAN_LUNAR_AU = 384400 / 149597870.7; // ≈ 0.002569 AU
 const AU_TO_UNITS = (typeof moonDistance !== 'undefined' ? moonDistance : 5) / MEAN_LUNAR_AU;
 
 // Time scale (simulated time vs real time). Increase this to speed up the sky.
-let speedMultiplier = 10000; // e.g., 100× real time
+let speedMultiplier = 500000; // e.g., simulated ms per real ms
 const realStart = Date.now();
 function simDate() {
   const elapsed = Date.now() - realStart;
   return new Date(realStart + elapsed * speedMultiplier);
 }
 
+/* ======= UTC HUD (top-center) ======= */
+const utcHud = document.createElement('div');
+utcHud.style.cssText = `
+  position:fixed; top:0; left:50%; transform:translateX(-50%);
+  background:#000; color:#fff; padding:6px 10px;
+  font:14px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  z-index:9999; border-bottom-left-radius:6px; border-bottom-right-radius:6px;
+  pointer-events:none;
+`;
+utcHud.textContent = 'UTC: —';
+document.body.appendChild(utcHud);
+
+function pad2(n){ return String(n).padStart(2,'0'); }
+function formatUTC(d){
+  return `UTC: ${d.getUTCFullYear()}-${pad2(d.getUTCMonth()+1)}-${pad2(d.getUTCDate())} `
+       + `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`;
+}
+
+/* ======= Moon rotation tweak controls ======= */
+// Vector helper for Earth direction
+const _toEarth = new THREE.Vector3();
+// Custom scalar to adjust the Moon's roll (about the Earth→Moon axis).
+// Units: radians per *simulated* second. Positive spins eastward.
+// Use small values, e.g., 0.0 (locked), 0.001, -0.001, etc.
+let MOON_ROLL_SPEED = 0.0;
+
+// Optional constant offset (radians) applied every frame after lookAt,
+// around the Earth→Moon axis (keeps face pointing at Earth).
+// Set to Math.PI to flip the texture 180° without breaking lock.
+const MOON_ROLL_OFFSET = 0;
+
+// Track previous simulated time to compute dt (in simulated seconds)
+let _prevSimMs = null;
+
+/* ------------------------------ */
+
 // ---------- Animate ----------
 renderer.setAnimationLoop(() => {
   // Simulated time
   const date = simDate();
+  utcHud.textContent = formatUTC(date);
+
+  // Sim dt in seconds (based on simulated clock)
+  const simMs = date.getTime();
+  const dtSimSec = (_prevSimMs === null) ? 0 : (simMs - _prevSimMs) / 1000;
+  _prevSimMs = simMs;
+
   const jd   = jdUTC(date);
   const T    = centuriesTT(jd);
 
@@ -269,29 +332,34 @@ renderer.setAnimationLoop(() => {
   const sunJ  = sunEci(T);
   const moonJ = moonEci(T);
 
-  // Precess to mean-of-date ECI (optional but nicer)
+  // Precess to mean-of-date ECI
   const P = precessionMatrix(T);
   const sunMOD  = applyMat3(P, sunJ);
   const moonMOD = applyMat3(P, moonJ);
 
-  // Convert to scene coords & scale AU -> scene units.
-  // IMPORTANT: Keep your *lighting* distance small so shadows stay fine.
-  // We use ephemeris direction, then put the Sun at a fixed radius (your old ~12 units).
+  // --- Sun: use true direction, keep small radius for shadows ---
   const sunDir = eciToThree(sunMOD).normalize();
-  const sunR   = 12; // keep your existing lighting radius for stable shadows
+  const sunR   = 12; // your existing shadow-friendly radius
   const sunPos = sunDir.multiplyScalar(sunR);
-
-  // Place DirectionalLight + visible Sun sphere
   sun.position.copy(sunPos);
   if (typeof sunMesh !== 'undefined') sunMesh.position.copy(sunPos);
   sun.target.position.set(0, 0, 0);
   sun.target.updateMatrixWorld();
 
-  // Moon: place at true (variable) distance but scaled so mean ≈ moonDistance
+  // --- Moon: true position (scaled) + tidal locking with adjustable roll ---
   const moonPos = eciToThree(moonMOD).multiplyScalar(AU_TO_UNITS);
   moon.position.copy(moonPos);
 
-  // Earth spin: reset, apply tilt, then sidereal angle (GMST)
+  // Point the Moon's -Z toward Earth's center (tidal lock)
+  moon.lookAt(0, 0, 0);
+
+  // Roll about the Earth→Moon axis to align texture / tweak spin rate
+  _toEarth.set(-moon.position.x, -moon.position.y, -moon.position.z).normalize();
+  // Apply constant offset (phase) + per-second spin (speed)
+  const roll = MOON_ROLL_OFFSET + MOON_ROLL_SPEED * dtSimSec;
+  if (roll !== 0) moon.rotateOnAxis(_toEarth, roll);
+
+  // --- Earth spin: tilt + sidereal rotation (GMST) ---
   earth.rotation.set(0, 0, 0);
   earth.rotateZ(THREE.MathUtils.degToRad(23.4)); // your visual tilt
   earth.rotateY(gmstRad(jd));                    // sidereal rotation
@@ -299,4 +367,3 @@ renderer.setAnimationLoop(() => {
   controls.update();
   renderer.render(scene, camera);
 });
-

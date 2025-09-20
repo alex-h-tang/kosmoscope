@@ -39,21 +39,17 @@ scene.add(sun.target);
 const texLoader = new THREE.TextureLoader();
 const earthMap = texLoader.load(
   '/overlays/earth_day.png',
-  // onLoad
   (t) => {
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = renderer.capabilities.getMaxAnisotropy();
   },
-  // onProgress
   undefined,
-  // onError
   (err) => {
     console.error('Failed to load /textures/earth_day.jpg', err);
   }
 );
 
 const earthGeo = new THREE.SphereGeometry(2, 128, 128);
-// Start with Phong + map; if texture fails, we’ll swap to Basic color in animate loop
 const earthMat = new THREE.MeshPhongMaterial({ map: earthMap });
 const earth = new THREE.Mesh(earthGeo, earthMat);
 earth.castShadow = true;
@@ -73,24 +69,21 @@ scene.add(sunMesh);
 const moonRadius   = 0.54;  // relative to Earth radius=2
 const moonDistance = 5.0;   // distance from Earth center (scene units)
 
-// Load equirectangular color texture
 const moonTex = texLoader.load(
   '/overlays/moon.jpg',
   (t) => {
-    t.colorSpace = THREE.SRGBColorSpace;                         // correct color
-    t.anisotropy = renderer.capabilities.getMaxAnisotropy();     // sharper at grazing angles
-    // SphereGeometry already has equirectangular UVs; no extra mapping needed
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
   },
   undefined,
   (err) => console.error('Failed to load /overlays/moon.jpg', err)
 );
 
-// (Optional) use the same image as a gentle bump map for relief
 const moonMat = new THREE.MeshPhongMaterial({
   map: moonTex,
   bumpMap: moonTex,
-  bumpScale: 0.025,            // tweak 0.015–0.05 to taste
-  specular: 0x111111,          // very low specular—moon is matte
+  bumpScale: 0.025,
+  specular: 0x111111,
   shininess: 5
 });
 
@@ -105,7 +98,6 @@ scene.add(moonPivot);
 moonPivot.add(moon);
 moon.position.set(moonDistance, 0, 0); // start on +X
 
-
 // ---------- Resize ----------
 window.addEventListener('resize', () => {
   const w = window.innerWidth, h = window.innerHeight;
@@ -115,32 +107,21 @@ window.addEventListener('resize', () => {
 });
 
 // ===== HELPER FUNCTIONS FOR ANIMATION =====
+function jdUTC(date = new Date()) { return date.getTime() / 86400000 + 2440587.5; }
 
-// Julian Date (UTC)
-function jdUTC(date = new Date()) {
-  return date.getTime() / 86400000 + 2440587.5;
-}
-
-// Very rough ΔT (TT-UTC) ≈ 69 s near 2025
 function centuriesTT(jd_utc) {
   const deltaT = 69; // seconds
   const jd_tt = jd_utc + deltaT / 86400;
   return (jd_tt - 2451545.0) / 36525;
 }
 
-// Mean obliquity ε0 (radians)
 function meanObliquityRad(T) {
   const eps0_arcsec =
-    84381.406
-    - 46.836769*T
-    - 0.0001831*T*T
-    + 0.00200340*T*T*T
-    - 5.76e-7*T*T*T*T
-    - 4.34e-8*T*T*T*T*T;
+    84381.406 - 46.836769*T - 0.0001831*T*T + 0.00200340*T*T*T
+    - 5.76e-7*T*T*T*T - 4.34e-8*T*T*T*T*T;
   return (eps0_arcsec / 3600) * Math.PI / 180;
 }
 
-// GMST (radians)
 function gmstRad(jd) {
   const Tu = (jd - 2451545.0) / 36525.0;
   let gmst_sec =
@@ -149,28 +130,21 @@ function gmstRad(jd) {
     0.093104*Tu*Tu -
     6.2e-6*Tu*Tu*Tu;
   gmst_sec = ((gmst_sec % 86400) + 86400) % 86400;
-  return (gmst_sec / 240) * Math.PI / 180; // 240 s = 1°
+  return (gmst_sec / 240) * Math.PI / 180;
 }
 
-// Sun position in ECI (AU), low-precision (excellent visually)
+// Sun position in ECI (AU)
 function sunEci(T) {
   const d2r = Math.PI/180;
-  const g = (357.52911 + 35999.05029*T - 0.0001537*T*T) * d2r; // mean anomaly
-  const L = (280.46646 + 36000.76983*T + 0.0003032*T*T) * d2r; // mean longitude
-
+  const g = (357.52911 + 35999.05029*T - 0.0001537*T*T) * d2r;
+  const L = (280.46646 + 36000.76983*T + 0.0003032*T*T) * d2r;
   const lambda =
     ( (L/d2r)
     + (1.914602 - 0.004817*T - 0.000014*T*T)*Math.sin(g)
     + (0.019993 - 0.000101*T)*Math.sin(2*g)
     + 0.000289*Math.sin(3*g) ) * d2r;
-
-  const R = 1.000001018
-          - 0.016708617*Math.cos(g)
-          - 0.000139589*Math.cos(2*g); // AU
-
+  const R = 1.000001018 - 0.016708617*Math.cos(g) - 0.000139589*Math.cos(2*g);
   const eps = meanObliquityRad(T);
-
-  // Ecliptic → Equatorial (J2000)
   const x = R * Math.cos(lambda);
   const y = R * Math.sin(lambda) * Math.cos(eps);
   const z = R * Math.sin(lambda) * Math.sin(eps);
@@ -180,7 +154,6 @@ function sunEci(T) {
 // Moon (Meeus short series) in ECI (AU)
 function moonEci(T) {
   const d2r = Math.PI/180;
-  // Fundamental arguments (deg)
   const Lp = 218.3164477 + 481267.88123421*T - 0.0015786*T*T + T*T*T/538841 - T*T*T*T/65194000;
   const D  = 297.8501921 + 445267.1114034*T - 0.0018819*T*T + T*T*T/545868 - T*T*T*T/113065000;
   const M  = 357.5291092 + 35999.0502909*T - 0.0001536*T*T + T*T*T/24490000;
@@ -205,7 +178,6 @@ function moonEci(T) {
     + 0.046*Math.sin(2*D_r - Mp_r + F_r)
   ) * d2r;
 
-  // Distance (km) → AU
   const delta_km =
     385000.56
     - 20905.355*Math.cos(Mp_r)
@@ -215,13 +187,11 @@ function moonEci(T) {
 
   const r_AU = delta_km / 149597870.7;
 
-  // Ecliptic spherical → Cartesian
   const cosLat = Math.cos(lat);
   const xe = r_AU * cosLat * Math.cos(lon);
   const ye = r_AU * cosLat * Math.sin(lon);
   const ze = r_AU * Math.sin(lat);
 
-  // Rotate to equatorial by mean obliquity (J2000)
   const eps = meanObliquityRad(T);
   const x = xe;
   const y = ye*Math.cos(eps) - ze*Math.sin(eps);
@@ -261,17 +231,14 @@ function applyMat3(m, v) {
 }
 
 // Map ECI (x,y,z) → your scene axes (Y up). We'll use (x,z,y) ordering.
-function eciToThree(v) {
-  return new THREE.Vector3(v.x, v.z, v.y);
-}
+function eciToThree(v) { return new THREE.Vector3(v.x, v.z, v.y); }
 
 // === Scene scale: keep your existing sizes ===
-// You set moonDistance = 5 (scene units). Make mean Moon distance (~0.002569 AU) equal ~5 units:
 const MEAN_LUNAR_AU = 384400 / 149597870.7; // ≈ 0.002569 AU
 const AU_TO_UNITS = (typeof moonDistance !== 'undefined' ? moonDistance : 5) / MEAN_LUNAR_AU;
 
-// Time scale (simulated time vs real time). Increase this to speed up the sky.
-let speedMultiplier = 500000; // e.g., simulated ms per real ms
+// Time scale
+let speedMultiplier = 1000;
 const realStart = Date.now();
 function simDate() {
   const elapsed = Date.now() - realStart;
@@ -297,20 +264,149 @@ function formatUTC(d){
 }
 
 /* ======= Moon rotation tweak controls ======= */
-// Vector helper for Earth direction
 const _toEarth = new THREE.Vector3();
-// Custom scalar to adjust the Moon's roll (about the Earth→Moon axis).
-// Units: radians per *simulated* second. Positive spins eastward.
-// Use small values, e.g., 0.0 (locked), 0.001, -0.001, etc.
 let MOON_ROLL_SPEED = 0.0;
-
-// Optional constant offset (radians) applied every frame after lookAt,
-// around the Earth→Moon axis (keeps face pointing at Earth).
-// Set to Math.PI to flip the texture 180° without breaking lock.
 const MOON_ROLL_OFFSET = 0;
-
-// Track previous simulated time to compute dt (in simulated seconds)
 let _prevSimMs = null;
+
+/* ========= Space stations via Kepler (dot only) ========= */
+const EARTH_RADIUS_KM    = 6378.137;
+const MU_EARTH           = 398600.4418;
+const J2                 = 1.08262668e-3;
+const EARTH_RADIUS_UNITS = 2.0;
+const KM_TO_UNITS_LEO    = EARTH_RADIUS_UNITS / EARTH_RADIUS_KM;
+const D2R = Math.PI/180;
+
+function solveE(M, e, tol=1e-8){
+  let E = e < 0.8 ? M : Math.PI;
+  for (let k=0;k<20;k++){
+    const f = E - e*Math.sin(E) - M;
+    const fp= 1 - e*Math.cos(E);
+    const dE= -f/fp;
+    E += dE;
+    if (Math.abs(dE) < tol) break;
+  }
+  return E;
+}
+function perifocalToECI(Ω,i,ω){
+  const cO=Math.cos(Ω), sO=Math.sin(Ω);
+  const ci=Math.cos(i), si=Math.sin(i);
+  const cw=Math.cos(ω), sw=Math.sin(ω);
+  return [
+    [ cO*cw - sO*sw*ci,  -cO*sw - sO*cw*ci,  sO*si ],
+    [ sO*cw + cO*sw*ci,  -sO*sw + cO*cw*ci, -cO*si ],
+    [ sw*si           ,   cw*si            ,  ci   ]
+  ];
+}
+function mul3(M,v){
+  return { x:M[0][0]*v.x + M[0][1]*v.y + M[0][2]*v.z,
+           y:M[1][0]*v.x + M[1][1]*v.y + M[1][2]*v.z,
+           z:M[2][0]*v.x + M[2][1]*v.y + M[2][2]*v.z };
+}
+function eciKmToThreeUnits(p){
+  return new THREE.Vector3(p.x, p.z, p.y).multiplyScalar(KM_TO_UNITS_LEO);
+}
+function j2Rates(a,e,i){
+  const n = Math.sqrt(MU_EARTH/(a*a*a));
+  const p = a*(1-e*e);
+  const fac = J2 * Math.pow(EARTH_RADIUS_KM/p,2) * n;
+  const raanDot = -1.5 * fac * Math.cos(i);
+  const argpDot =  0.75 * fac * (5*Math.cos(i)**2 - 1);
+  return { n, raanDot, argpDot };
+}
+function propagateKepler(elem, date){
+  const t = date.getTime()/1000;
+  const dt = t - elem.epoch_s;
+  const { n, raanDot, argpDot } = j2Rates(elem.a_km, elem.e, elem.i_rad);
+  const Ω = elem.raan_rad + raanDot*dt;
+  const ω = elem.argp_rad + argpDot*dt;
+  const M = elem.M0_rad   + n*dt;
+  const E = solveE(((M%(2*Math.PI))+2*Math.PI)%(2*Math.PI), elem.e);
+  const r = elem.a_km * (1 - elem.e*Math.cos(E));
+  const ν = Math.atan2(Math.sqrt(1-elem.e*elem.e)*Math.sin(E), Math.cos(E)-elem.e);
+  const r_pqw = { x:r*Math.cos(ν), y:r*Math.sin(ν), z:0 };
+  const R = perifocalToECI(Ω, elem.i_rad, ω);
+  return mul3(R, r_pqw); // km
+}
+
+// Stations container and adder (dot only)
+const stations = [];
+function addStationKepler({
+  name='Station', a_km, e=0.001, i_deg,
+  raan_deg=0, argp_deg=0, M0_deg=0,
+  epoch=new Date(), color=0xff5555
+}){
+  const station = {
+    name, a_km, e,
+    i_rad: i_deg*D2R,
+    raan_rad: raan_deg*D2R,
+    argp_rad: argp_deg*D2R,
+    M0_rad: M0_deg*D2R,
+    epoch_s: epoch.getTime()/1000
+  };
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.03, 16, 16),
+    new THREE.MeshBasicMaterial({ color })
+  );
+  dot.userData.station = station;
+  scene.add(dot);
+  const entry = { station, dot };
+  stations.push(entry);
+  return entry;
+}
+
+// ---- ISS CONTRAIL HELPERS ----
+function attachTrailToStation(entry, { length = 100, color = 0xffffff, opacity = 0.8 } = {}) {
+  const geom = new THREE.BufferGeometry();
+  const positions = new Float32Array(length * 3);
+  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
+  const line = new THREE.Line(geom, mat);
+  line.frustumCulled = false;
+  scene.add(line);
+
+  entry.trail = {
+    line,
+    geom,
+    positions,
+    max: length,
+    points: [],
+  };
+}
+
+function updateTrail(entry, posVec3) {
+  const t = entry.trail;
+  if (!t) return;
+
+  t.points.push(posVec3.clone());
+  if (t.points.length > t.max) t.points.shift();
+
+  const n = t.points.length; // number of vertices
+  for (let i = 0; i < n; i++) {
+    const p = t.points[i];
+    const k = i * 3;
+    t.positions[k]     = p.x;
+    t.positions[k + 1] = p.y;
+    t.positions[k + 2] = p.z;
+  }
+  t.geom.setDrawRange(0, n); // draw n vertices (n-1 segments)
+  t.geom.attributes.position.needsUpdate = true;
+}
+
+// Example station (ISS-like) — tune angles to taste
+const issEntry = addStationKepler({
+  name: 'ISS',
+  a_km: EARTH_RADIUS_KM + 420, // ~420 km altitude
+  e:    0.001,
+  i_deg:51.64,
+  raan_deg: 0,
+  argp_deg: 0,
+  M0_deg:   0,
+  epoch: new Date(Date.UTC(2025,0,1,0,0,0)),
+  color: 0xffffff
+});
+// >>> ATTACH THE TRAIL <<<
+attachTrailToStation(issEntry, { length: 335, color: 0xbebebe, opacity: 0.6 });
 
 /* ------------------------------ */
 
@@ -337,32 +433,37 @@ renderer.setAnimationLoop(() => {
   const sunMOD  = applyMat3(P, sunJ);
   const moonMOD = applyMat3(P, moonJ);
 
-  // --- Sun: use true direction, keep small radius for shadows ---
+  // --- Sun: direction-only, small radius for shadows ---
   const sunDir = eciToThree(sunMOD).normalize();
-  const sunR   = 12; // your existing shadow-friendly radius
+  const sunR   = 12;
   const sunPos = sunDir.multiplyScalar(sunR);
   sun.position.copy(sunPos);
-  if (typeof sunMesh !== 'undefined') sunMesh.position.copy(sunPos);
+  sunMesh.position.copy(sunPos);
   sun.target.position.set(0, 0, 0);
   sun.target.updateMatrixWorld();
 
-  // --- Moon: true position (scaled) + tidal locking with adjustable roll ---
+  // --- Moon: true position (scaled) + tidal locking w/ adjustable roll ---
   const moonPos = eciToThree(moonMOD).multiplyScalar(AU_TO_UNITS);
   moon.position.copy(moonPos);
-
-  // Point the Moon's -Z toward Earth's center (tidal lock)
   moon.lookAt(0, 0, 0);
-
-  // Roll about the Earth→Moon axis to align texture / tweak spin rate
-  _toEarth.set(-moon.position.x, -moon.position.y, -moon.position.z).normalize();
-  // Apply constant offset (phase) + per-second spin (speed)
   const roll = MOON_ROLL_OFFSET + MOON_ROLL_SPEED * dtSimSec;
-  if (roll !== 0) moon.rotateOnAxis(_toEarth, roll);
+  if (roll !== 0) {
+    _toEarth.set(-moon.position.x, -moon.position.y, -moon.position.z).normalize();
+    moon.rotateOnAxis(_toEarth, roll);
+  }
+
+  // --- Stations: propagate, position dot, update contrail ---
+  for (const s of stations){
+    const rECI_km = propagateKepler(s.station, date);
+    const pos = eciKmToThreeUnits(rECI_km);
+    s.dot.position.copy(pos);
+    updateTrail(s, pos);
+  }
 
   // --- Earth spin: tilt + sidereal rotation (GMST) ---
   earth.rotation.set(0, 0, 0);
-  earth.rotateZ(THREE.MathUtils.degToRad(23.4)); // your visual tilt
-  earth.rotateY(gmstRad(jd));                    // sidereal rotation
+  earth.rotateZ(THREE.MathUtils.degToRad(23.4));
+  earth.rotateY(gmstRad(jd));
 
   controls.update();
   renderer.render(scene, camera);

@@ -12,7 +12,7 @@ An interactive, real-time globe for visualizing influential space launches. Watc
 
 - Clickable flags — one flag per unique launch site (de-duped by rounded lat/lon), with country-specific icons:
 
--USA (Cape/Vandenberg), China (Wenchang/Jiuquan/etc.), French Guiana (Kourou), plus a generic fallback.
+- USA (Cape/Vandenberg), China (Wenchang/Jiuquan/etc.), French Guiana (Kourou), plus a generic fallback.
 
 - LEO + Moon — low-Earth orbit arcs and a trans-lunar injection (TLI) coast with a small lunar capture/follow segment.
 

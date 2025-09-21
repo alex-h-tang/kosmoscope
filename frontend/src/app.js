@@ -56,7 +56,7 @@ const msToSlider = (ms) => Math.round(Math.min(1, Math.max(0, (ms - SIM_START_MS
 let isPlaying = true;
 let simMs     = SIM_START_MS;
 let lastRealMs = performance.now();
-let simRate   = 24 * 3600; // 1 sim-day / sec
+let simRate   = 60; // 1 sim-day / sec
 
 let rateFrom = simRate, rateTo = simRate, rateLerpStartReal = 0, rateLerpEndReal = 0;
 function smoothSetSimRate(targetRate, rampSec = 0.4) {
@@ -96,10 +96,12 @@ const hudEl = document.getElementById('hud') || hud?.el; // whichever your HUD u
 if (hudEl) {
   hudEl.style.position = 'fixed';
   hudEl.style.left = '50%';
-  hudEl.style.bottom = '16px';
+  hudEl.style.bottom = '25px';
   hudEl.style.top = 'auto';                 // unset any top pinning
   hudEl.style.transform = 'translateX(-50%)';
   hudEl.style.pointerEvents = 'none';       // optional: clicks pass through
+  hudEl.style.fontSize = '16px';           // <<— make CSV-driven messages bigger
+  hudEl.style.lineHeight = '1.35';         // optional: nicer readability
 }
 // Keep PickManager only for FLAGS. We won't register rockets anymore.
 const pick = new PickManager(renderer, camera, hud?.showInfo ?? (()=>{}), hud?.hideInfo ?? (()=>{}));
@@ -264,10 +266,10 @@ const eduPanel = (() => {
   `;
   const title = document.createElement('div');
   title.id = 'edu-title';
-  title.style.cssText = `font:700 15px/1.2 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin-bottom:6px; color:#cde3ff;`;
+  title.style.cssText = `font:700 30px/1.2 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin-bottom:6px; color:#cde3ff;`;
   const body = document.createElement('div');
   body.id = 'edu-body';
-  body.style.cssText = `font:400 14px/1.35 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; white-space:normal;`;
+  body.style.cssText = `font:400 20px/1.35 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; white-space:pre-line;`;
   wrap.appendChild(title); wrap.appendChild(body);
   document.body.appendChild(wrap);
 
@@ -335,8 +337,8 @@ window.addEventListener('keydown', (e) => {
     updateTimeUI();
   }
   if (k === ' ') { isPlaying = !isPlaying; playBtn.textContent = isPlaying ? '⏸' : '▶︎'; }
-  if (k === '1') simRate = 3600;
-  if (k === '2') simRate = 24*3600;
+  if (k === '1') simRate = 60;
+  if (k === '2') simRate = 3600;
   if (k === '3') simRate = 7*24*3600;
 });
 function recordsFromRows(rows) {

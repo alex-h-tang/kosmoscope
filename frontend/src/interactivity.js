@@ -88,7 +88,7 @@ export function createHud() {
   const info = document.createElement('div');
   info.id = 'hud-info';
   info.style.cssText = `
-    position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
+    position:fixed; left:50%; bottom:10px; transform:translateX(-50%);
     background:transparent; color:#fff; padding:0; margin:0;
     font:600 16px/1.25 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     text-shadow: 0 1px 2px rgba(0,0,0,0.6);

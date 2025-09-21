@@ -22,6 +22,7 @@ Lightweight stack — frontend is plain Three.js + ES modules; a Python backend 
 GitHub
 
 # Repo structure
+```
 kosmoscope/
 ├─ frontend/          # Browser app (Three.js, ES modules)
 │  ├─ public/         # Static assets (flags, textures, audio, CSV)
@@ -35,4 +36,5 @@ kosmoscope/
 │  └─ index.html
 ├─ backend/           # Python service (optional; future data sources)
 └─ README.md
+```
 

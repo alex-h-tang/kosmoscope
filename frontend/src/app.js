@@ -202,11 +202,11 @@ function recordsFromRows(rows) {
 
 /* ---------- Flags by country (unchanged) ---------- */
 const FLAG_PATHS = {
-  china:  ['../public/flags/china.png',  '/flags/china.png',  '/china.png'],
-  usa:    ['../public/flags/usa.png',    '/flags/usa.png',    '/usa.png'],
-  guiana: ['../public/flags/guiana.png', '/flags/guiana.png', '/guiana.png'],
-  kazakhstan: ['../public/flags/kazakhstan.png', '/flags/kazakhstan.png', '/kazakhstan.png'],
-  generic:['../public/flags/launch.png', '/public/icons/launchpad.png', '/public/flags/flag.png'],
+  china:  ['/flags/china.png',  '/china.png'],
+  usa:    [  '/flags/usa.png',    '/usa.png'],
+  guiana: ['/flags/guiana.png', '/guiana.png'],
+  kazakhstan: ['/flags/kazakhstan.png', '/kazakhstan.png'],
+  generic:[ '/public/icons/launchpad.png', '/public/flags/flag.png'],
 };
 const isInBox = (lat,lon,{latMin,latMax,lonMin,lonMax}) => lat>=latMin && lat<=latMax && lon>=lonMin && lon<=lonMax;
 function siteCountry(lat, lon) {

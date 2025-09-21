@@ -117,17 +117,23 @@ const rockets = installRocketModule({
   ascentSlowdown: 2.0,
   pickManager: null,              // ← stop registering rockets for picking
   moonPositionFn,
-  onEvent: (ev) => {              // ← listen to rocket lifecycle
+  onEvent: (ev) => {
     if (ev.type === 'launch-start') {
       const who = (ev.astronauts || []).join(', ');
       const lat = ev.lat != null ? `${ev.lat.toFixed(4)}°` : '';
       const lon = ev.lon != null ? `${ev.lon.toFixed(4)}°` : '';
       const where = (lat && lon) ? ` • ${lat}, ${lon}` : '';
       const subtitle = [who, ev.description].filter(Boolean).join(' — ');
-      hud?.showInfo?.(`${ev.label || 'Launch'}${subtitle ? ` — ${subtitle}` : ''}${where}`);
+      const msg = `${ev.label || 'Launch'}${subtitle ? ` — ${subtitle}` : ''}${where}`;
+
+      // make it sticky until rocket is actually deleted
+      hud?.showInfo?.(msg, { sticky: true });
       lastShownRocketId = ev.id;
     } else if (ev.type === 'rocket-deleted') {
-      if (lastShownRocketId === ev.id) { hud?.hideInfo?.(); lastShownRocketId = null; }
+      if (lastShownRocketId === ev.id) {
+        hud?.hideInfo?.();
+        lastShownRocketId = null;
+      }
     }
   }
 });

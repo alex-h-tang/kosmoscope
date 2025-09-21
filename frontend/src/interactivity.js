@@ -82,46 +82,60 @@ export class PickManager {
    - Transparent background
    - Throttled UTC updates (1Hz)
    =========================== */
+// interactivity.js
+// interactivity.js
 export function createHud() {
-  const fontStack = 'Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"';
-
-  // UTC: top-center, transparent background
-  const utc = document.createElement('div');
-  utc.style.cssText = `
-    position:fixed; top:0; left:50%; transform:translateX(-50%);
-    background:transparent; color:#fff; padding:6px 10px;
-    font:600 14px/1.2 ${fontStack};
-    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
-    z-index:9999; pointer-events:none; will-change: contents;
-  `;
-  utc.textContent = 'UTC: —';
-  document.body.appendChild(utc);
-
-  // Info: left side, vertically centered
+  const fontStack = `ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
   const info = document.createElement('div');
-info.id = 'hud-info';  // <-- give it an id so app.js/CSS can target it
-info.style.cssText = `
-  position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
-  background:transparent; color:#fff; padding:0; margin:0;
-  font:500 16px/1.25 ${fontStack};
-  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
-  z-index:9998; pointer-events:none; display:none; will-change: contents;
-`;
-document.body.appendChild(info);
+  info.id = 'hud-info';
+  info.style.cssText = `
+    position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
+    background:transparent; color:#fff; padding:0; margin:0;
+    font:600 16px/1.25 ${fontStack};
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    z-index:9998; pointer-events:none; display:none; will-change: contents, opacity;
+  `;
+  document.body.appendChild(info);
 
-  // Throttle UTC to once per second
-  let lastSec = -1;
-  return {
-    setUtc: (s) => {
-      const secKey = s.slice(-2);
-      if (secKey !== lastSec) {
-        utc.textContent = s;
-        lastSec = secKey;
-      }
-    },
-    showInfo: (s) => { info.textContent = s; info.style.display = 'block'; },
-    hideInfo: () => { info.style.display = 'none'; }
-  };
+  let hideTimer = null;
+  let isSticky = false;
+
+  // Base: simRateBaseline = 3600 (slowest preset). We scale TTL by (simRate / simRateBaseline).
+  function showInfo(text, opts = {}) {
+    const {
+      sticky = false,
+      ttlMsAtSimRate3600 = 4000,   // 4s when simRate === 3600
+      simRate = 3600               // pass current simRate from app.js
+    } = opts;
+
+    isSticky = !!sticky;
+
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+
+    info.textContent = text ?? '';
+    info.style.display = text ? 'block' : 'none';
+    info.style.opacity = '1';
+
+    if (!isSticky && text) {
+      const simRateBaseline = 3600;
+      const scale = Math.max(0.1, simRate / simRateBaseline); // >= 0.1 just in case
+      const ttlMs = Math.round(ttlMsAtSimRate3600 * scale);
+
+      hideTimer = setTimeout(() => {
+        info.style.opacity = '0';
+        setTimeout(() => { if (!isSticky) info.style.display = 'none'; }, 250);
+      }, ttlMs);
+    }
+  }
+
+  function hideInfo() {
+    isSticky = false;
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    info.style.opacity = '0';
+    setTimeout(() => { if (!isSticky) info.style.display = 'none'; }, 250);
+  }
+
+  return { showInfo, hideInfo, el: info };
 }
 
 let __bgmSingleton = null;

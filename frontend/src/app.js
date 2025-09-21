@@ -8,7 +8,87 @@ import { addFlagMarker } from './markers.js';
 import { PickManager, createHud, createAudioButton } from './interactivity.js';
 import { installRocketModule } from './rockets.js';
 
-/* ---------- Boot ---------- */
+/* ==================== Dramatic intro (2 lines, fade-in sequentially) ==================== */
+async function playIntro({
+  line1 = 'KOSMOSCOPE',
+  line2 = '(a brief history of monkeys in space)',
+  totalHoldMs = 3000,         // hold after second line appears
+  fadeMs = 1000,              // each line fade-in time
+  gapMs = 1000,               // delay between line 1 and line 2
+  outroFadeMs = 1000          // fade-out the whole overlay
+} = {}) {
+  // Respect prefers-reduced-motion: skip animation but still show briefly
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'intro-overlay';
+  overlay.style.cssText = `
+    position:fixed; inset:0; z-index:100000;
+    background:#000; display:flex; align-items:center; justify-content:center;
+    transition:opacity ${outroFadeMs}ms ease;
+  `;
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = `
+    text-align:center; color:#fff; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  `;
+
+  const l1 = document.createElement('div');
+  const l2 = document.createElement('div');
+
+  l1.textContent = line1;
+  l2.textContent = line2;
+
+  const baseSize = Math.max(20, Math.min(44, Math.floor(window.innerWidth * 0.035)));
+  l1.style.cssText = `
+    font-weight:800; letter-spacing:.08em; margin:0 0 12px 0;
+    opacity:0; transform:translateY(8px);
+    font-size:${baseSize*2}px; line-height:1.15;
+    transition:opacity ${fadeMs}ms ease, transform ${fadeMs}ms ease;
+  `;
+  l2.style.cssText = `
+    font-weight:500; letter-spacing:.03em; opacity:0; transform:translateY(8px);
+    font-size:${Math.round(baseSize * 0.78)}px; line-height:1.2;
+    transition:opacity ${fadeMs}ms ease, transform ${fadeMs}ms ease;
+  `;
+
+  wrap.appendChild(l1);
+  wrap.appendChild(l2);
+  overlay.appendChild(wrap);
+  document.body.appendChild(overlay);
+
+  const wait = (ms) => new Promise(res => setTimeout(res, ms));
+
+  if (reduceMotion) {
+    l1.style.opacity = '1'; l1.style.transform = 'none';
+    l2.style.opacity = '0.5'; l2.style.transform = 'none';
+    await wait(300);
+  } else {
+    // Fade in first line
+    await wait(50);
+    l1.style.opacity = '1';
+    l1.style.transform = 'none';
+
+    // Then second line
+    await wait(gapMs);
+    l2.style.opacity = '0.5';
+    l2.style.transform = 'none';
+
+    await wait(totalHoldMs);
+  }
+
+  // Fade out overlay
+  overlay.style.opacity = '0';
+  await wait(outroFadeMs + 50);
+  overlay.remove();
+}
+
+/* ---------- Boot (run intro first) ---------- */
+await playIntro({
+  line1: 'KOSMOSCOPE',
+  line2: '(a brief history of monkeys in space)'
+});
+
 const canvas = document.getElementById('scene');
 const renderer = createRenderer(canvas);
 const { scene, camera, earth, moon, texLoader, updateCelestials } = createScene(renderer);
@@ -97,11 +177,11 @@ if (hudEl) {
   hudEl.style.position = 'fixed';
   hudEl.style.left = '50%';
   hudEl.style.bottom = '25px';
-  hudEl.style.top = 'auto';                 // unset any top pinning
+  hudEl.style.top = 'auto';
   hudEl.style.transform = 'translateX(-50%)';
-  hudEl.style.pointerEvents = 'none';       // optional: clicks pass through
-  hudEl.style.fontSize = '16px';           // <<— make CSV-driven messages bigger
-  hudEl.style.lineHeight = '1.35';         // optional: nicer readability
+  hudEl.style.pointerEvents = 'none';
+  hudEl.style.fontSize = '16px';
+  hudEl.style.lineHeight = '1.35';
 }
 // Keep PickManager only for FLAGS. We won't register rockets anymore.
 const pick = new PickManager(renderer, camera, hud?.showInfo ?? (()=>{}), hud?.hideInfo ?? (()=>{}));
@@ -113,19 +193,18 @@ try { createAudioButton?.({ src: '/audio/interstellar.mp3', volume: 0.25, loop: 
 function moonPositionFn() { return moon ? moon.getWorldPosition(new THREE.Vector3()) : null; }
 
 let lastShownRocketId = null;
-let eduPanelForId   = null;     // panel “owner”
-let lastEduEventAt  = 0;        // last time we updated the panel
+let eduPanelForId   = null;
+let lastEduEventAt  = 0;
 const EDU_DEBOUNCE_MS = 180;
 let hudOrbitOwnerId   = null; 
 const rockets = installRocketModule({
   THREE, scene, earth,
   orbitSlowdown: 4.0,
   ascentSlowdown: 2.0,
-  pickManager: null,              // ← stop registering rockets for picking
+  pickManager: null,
   moonPositionFn,
   onEvent: (ev) => {
   if (ev.type === 'launch-start') {
-    // (unchanged) sticky launch HUD you already have
     const who = (ev.astronauts || []).join(', ');
     const lat = ev.lat != null ? `${ev.lat.toFixed(4)}°` : '';
     const lon = ev.lon != null ? `${ev.lon.toFixed(4)}°` : '';
@@ -137,7 +216,6 @@ const rockets = installRocketModule({
   }
 
   else if (ev.type === 'orbit-start') {
-    // Right panel only — do NOT touch bottom HUD
     const summary = getYouthSummaryForLabel(ev.label);
     eduPanelForId = ev.id;
     lastEduEventAt = performance.now();
@@ -145,21 +223,17 @@ const rockets = installRocketModule({
   }
 
   else if (ev.type === 'follow-start') {
-  // If this rocket already owns the panel OR no one owns it yet, show/update
   if (eduPanelForId === ev.id || eduPanelForId == null) {
     eduPanelForId = ev.id;
     lastEduEventAt = performance.now();
     const summary = getYouthSummaryForLabel(ev.label);
-    const extra = ' The vehicle is now orbiting near the Moon—watch how its path changes!';
+    const extra = '';
     eduPanel.show(ev.label, summary ? (summary + extra) : ('Now following the Moon.' + extra));
   }
-  // (if a different rocket owns the panel, we ignore to avoid flicker/stealing)
 }
 
   else if (ev.type === 'rocket-deleted') {
-    // Hide sticky launch HUD only if this rocket owned it
     if (lastShownRocketId === ev.id) { hud?.hideInfo?.(); lastShownRocketId = null; }
-    // Hide the right panel only if this rocket owns it, with debounce
     if (eduPanelForId === ev.id) {
       const since = performance.now() - lastEduEventAt;
       eduPanel.hide({ debounceMs: Math.max(EDU_DEBOUNCE_MS, 180 - since) });
@@ -185,7 +259,6 @@ async function loadCSVWithFallback() {
   throw lastErr ?? new Error('CSV not found in fallback paths');
 }
 async function loadYouthSummariesCSV() {
-  // Look in common public paths (adjust if you serve it elsewhere)
   const candidates = [
     '/data/mission_summaries_youth.csv',
     '/mission_summaries_youth.csv',
@@ -246,7 +319,6 @@ function buildYouthSummaryMap(rows) {
 }
 
 /* ===================== Education Panel (right side) ===================== */
-// Add this near your HUD creation in app.js
 const eduPanel = (() => {
   const wrap = document.createElement('aside');
   wrap.id = 'edu-panel';
@@ -298,24 +370,21 @@ const eduPanel = (() => {
 /* ===================== Wire everything together ===================== */
 let youthSummaryMap = new Map();
 (async () => {
-  const t = await loadYouthSummariesCSV();      // loads mission_summaries_youth.csv
-  youthSummaryMap = buildYouthSummaryMap(parseCSVToRows(t)); // Map<labelLower -> summary>
+  const t = await loadYouthSummariesCSV();
+  youthSummaryMap = buildYouthSummaryMap(parseCSVToRows(t));
 })();
 
-// Helper to fetch a summary by mission label with a soft fallback
 function getYouthSummaryForLabel(label) {
   if (!label) return '';
   const key = String(label).toLowerCase();
   if (youthSummaryMap.has(key)) return youthSummaryMap.get(key);
-
-  // very soft fuzzy: try without common punctuation/spaces
   const norm = key.replace(/[^\w]/g,'');
   for (const [k, v] of youthSummaryMap.entries()) {
     if (k.replace(/[^\w]/g,'') === norm) return v;
   }
   return '';
 }
-// tiny CSV + record builder
+
 function parseCSV(text) {
   const rows = []; let i=0,f='',row=[],q=false;
   while (i < text.length) {
@@ -341,6 +410,7 @@ window.addEventListener('keydown', (e) => {
   if (k === '2') simRate = 3600;
   if (k === '3') simRate = 7*24*3600;
 });
+
 function recordsFromRows(rows) {
   if (!rows?.length) return [];
   const h = rows[0] || [];

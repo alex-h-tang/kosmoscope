@@ -138,27 +138,54 @@ const pick = new PickManager(renderer, camera, hud?.showInfo ?? (()=>{}), hud?.h
 /* ---------- Audio ---------- */
 try { createAudioButton?.({ src: '/audio/interstellar.mp3', volume: 0.25, loop: true }); } catch {}
 
-/* ---------- Flag markers ---------- */
-await addFlagMarker({
-  earth, texLoader, renderer,
-  latDeg: 45.9203, lonDeg: 63.3422, radiusUnits: 2.0,
-  imageUrl: '/public/flags/kazakhstan.png',
-  flagSize: [0.20, 0.12],
-  title: 'Baikonur Cosmodrome — Site 1/5', subtitle: 'USSR / Kazakhstan',
-  pickManager: pick
-});
+/* ---------- Flag markers (converted) ---------- */
 await addFlagMarker({
   earth, texLoader, renderer,
   latDeg: 28.4360, lonDeg: -80.5680, radiusUnits: 2.0,
-  imageUrl: '/public/flags/usa.png', flagSize: [0.20, 0.12],
-  title: 'Cape Canaveral', subtitle: 'USA',
+  imageUrl: '/public/flags/usa.png',
+  flagSize: [0.20, 0.12],
+  title: 'Cape Canaveral — LC-5 (Mercury-Redstone MR-3/MR-4)',
+  subtitle: 'USA',
   pickManager: pick
 });
+
 await addFlagMarker({
   earth, texLoader, renderer,
   latDeg: 40.9606, lonDeg: 100.2983, radiusUnits: 2.0,
-  imageUrl: '/public/flags/china.png', flagSize: [0.20, 0.12],
-  title: 'Jiuquan', subtitle: 'China',
+  imageUrl: '/public/flags/china.png',
+  flagSize: [0.20, 0.12],
+  title: 'Jiuquan — LA-4 / Pad 921',
+  subtitle: 'China',
+  pickManager: pick
+});
+
+await addFlagMarker({
+  earth, texLoader, renderer,
+  latDeg: 35.0590, lonDeg: -118.1530, radiusUnits: 2.0,
+  imageUrl: '/public/flags/usa.png',
+  flagSize: [0.20, 0.12],
+  title: 'Mojave Air & Space Port / Edwards AFB',
+  subtitle: 'USA — suborbital (SpaceShipOne, 2004)',
+  pickManager: pick
+});
+
+await addFlagMarker({
+  earth, texLoader, renderer,
+  latDeg: 32.9899, lonDeg: -106.9740, radiusUnits: 2.0,
+  imageUrl: '/public/flags/usa.png',
+  flagSize: [0.20, 0.12],
+  title: 'Spaceport America',
+  subtitle: 'USA — suborbital (Virgin Galactic)',
+  pickManager: pick
+});
+
+await addFlagMarker({
+  earth, texLoader, renderer,
+  latDeg: 31.4420, lonDeg: -104.7570, radiusUnits: 2.0,
+  imageUrl: '/public/flags/usa.png',
+  flagSize: [0.20, 0.12],
+  title: 'Launch Site One (Blue Origin)',
+  subtitle: 'USA — suborbital (Van Horn, TX)',
   pickManager: pick
 });
 

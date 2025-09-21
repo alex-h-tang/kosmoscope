@@ -1,8 +1,8 @@
-#kosmoscope
+# kosmoscope
 
 An interactive, real-time globe for visualizing influential space launches. Watch rockets lift off from historical pads, auto-annotated with astronauts and mission info; drop country flags at each launch site; jump to the next scheduled launch; and follow trans-lunar injections to the Moon.
 
-#Features
+# Features
 
 CSV-driven launches — simple CSV powers the timeline (label, date, lat, lon, astronauts, description, duration).
 

@@ -20,3 +20,19 @@ Time controls — scrub, play/pause, slow-mo during ascent, and adjustable rates
 
 Lightweight stack — frontend is plain Three.js + ES modules; a Python backend folder is included for future services/integrations. 
 GitHub
+
+# Repo structure
+kosmoscope/
+├─ frontend/          # Browser app (Three.js, ES modules)
+│  ├─ public/         # Static assets (flags, textures, audio, CSV)
+│  ├─ src/
+│  │  ├─ app.js       # Entry; UI + time controls + queue + flags + HUD
+│  │  ├─ rockets.js   # Launch planner, ascent/LEO/TLI, lifecycle events
+│  │  ├─ interactivity.js  # HUD utilities (auto show/hide)
+│  │  ├─ markers.js   # Flag billboards on the globe
+│  │  ├─ scene.js     # Scene/camera/lighting/earth
+│  │  └─ astro.js     # UTC→sidereal helpers for Earth rotation, Moon pos
+│  └─ index.html
+├─ backend/           # Python service (optional; future data sources)
+└─ README.md
+

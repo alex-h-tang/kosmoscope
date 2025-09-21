@@ -306,7 +306,7 @@ renderer.setAnimationLoop(() => {
     const id = job.isMoon
       ? rockets.launchToMoonFromLatLon(job.lat, job.lon, {
           label: job.label, azimuthDeg: job.azimuthDeg, durationAscent: job.durationAscent,
-          ascentSpeedScale: job.ascentSpeedScale, transferSeconds: 3*24*3600, followSeconds: 10,
+          ascentSpeedScale: job.ascentSpeedScale, transferSeconds: 3*24*180, followSeconds: 10,
           color: 0x66c2ff, astronauts: job.astronauts, description: job.description,
         })
       : rockets.launchFromLatLon(job.lat, job.lon, {

@@ -18,6 +18,7 @@ export function installRocketModule({
   const deleteQueue = [];
   let prevSimMs = null;
   let nextId = 1;
+  const TLI_SPEEDUP = 6;
 
   /* ---------- helpers ---------- */
   const clamp01  = (t) => Math.max(0, Math.min(1, t));

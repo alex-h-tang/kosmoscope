@@ -187,9 +187,9 @@ const launchQueue = [{
   params: { label: 'Vostok 1', orbitAlt: 0.8, azimuthDeg: 90, durationAscent: 220, color: 0xff2b2b, ascentSpeedScale: 4 }
   },
   {
-    whenMs: Date.UTC(1962,2,20,14,47,39),
+    whenMs: Date.UTC(1962,1,20,14,47,39),
     lat: 28.4360, lon : -80.5680,
-    params: { label: 'Vostok 1', orbitAlt: 0.8, azimuthDeg: 90, durationAscent: 220, color: 0xff2b2b, ascentSpeedScale: 4 }
+    params: { label: 'MA6', orbitAlt: 0.8, azimuthDeg: 90, durationAscent: 220, color: 0xff2b2b, ascentSpeedScale: 4 }
   }
 
 ];
@@ -229,7 +229,7 @@ renderer.setAnimationLoop(() => {
   // End slow-mo window if due
   maybeEndSlowmo();
   const length = [simDate().getTime() + 10*60*60*1000,simDate().getTime() + 10*60*60*1000,simDate().getTime() + 10*60*60*1000]
-  const order = 0;
+  let order = 0;
 
   // Fire scheduled launches
   while (launchQueue.length && launchQueue[0].whenMs <= simMs) {
@@ -237,7 +237,9 @@ renderer.setAnimationLoop(() => {
     let id = rockets.launchFromLatLon(job.lat, job.lon, job.params);
     const ascent = job.params?.durationAscent ?? 200;
     const deleteAt = length[order]
+
     rockets.scheduleDelete(deleteAt, id);   // <— time first, then id
+    order +=1;
     
   }
   

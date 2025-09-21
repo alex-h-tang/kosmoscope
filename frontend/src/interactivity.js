@@ -99,14 +99,15 @@ export function createHud() {
 
   // Info: left side, vertically centered
   const info = document.createElement('div');
-  info.style.cssText = `
-    position:fixed; top:50%; left:24px; transform:translateY(-50%);
-    background:transparent; color:#fff; padding:0; margin:0;
-    font:500 16px/1.25 ${fontStack};
-    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
-    z-index:9998; pointer-events:none; display:none; will-change: contents;
-  `;
-  document.body.appendChild(info);
+info.id = 'hud-info';  // <-- give it an id so app.js/CSS can target it
+info.style.cssText = `
+  position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
+  background:transparent; color:#fff; padding:0; margin:0;
+  font:500 16px/1.25 ${fontStack};
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  z-index:9998; pointer-events:none; display:none; will-change: contents;
+`;
+document.body.appendChild(info);
 
   // Throttle UTC to once per second
   let lastSec = -1;

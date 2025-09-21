@@ -14,3 +14,12 @@ img.overlay {
   pointer-events: none;/* don't block mouse on canvas */
 }
 
+#hud{
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  top: auto;
+  transform: translateX(-50%);
+  pointer-events: none; /* optional */
+}
+

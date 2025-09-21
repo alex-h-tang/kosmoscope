@@ -1,4 +1,4 @@
-// app.js — CSV-driven launches + clickable rockets + Next Launch + country flag per site
+// app.js — CSV-driven launches + Next Launch + flags + AUTO INFO (no rocket clicking)
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
@@ -45,19 +45,12 @@ const playBtn    = bar.querySelector('#playPauseBtn');
 const nextBtn    = bar.querySelector('#nextLaunchBtn');
 
 const pad2 = (n) => String(n).padStart(2,'0');
-function msToUTCString(ms) {
+const msToUTCString = (ms) => {
   const d = new Date(ms);
-  return `UTC ${d.getUTCFullYear()}-${pad2(d.getUTCMonth()+1)}-${pad2(d.getUTCDate())} `
-       + `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`;
-}
-function sliderToMs(val) {
-  const t = Number(val) / 10000;
-  return Math.round(SIM_START_MS + t * (SIM_END_MS - SIM_START_MS));
-}
-function msToSlider(ms) {
-  const t = (ms - SIM_START_MS) / (SIM_END_MS - SIM_START_MS);
-  return Math.round(Math.min(1, Math.max(0, t)) * 10000);
-}
+  return `UTC ${d.getUTCFullYear()}-${pad2(d.getUTCMonth()+1)}-${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`;
+};
+const sliderToMs = (val) => Math.round(SIM_START_MS + (Number(val) / 10000) * (SIM_END_MS - SIM_START_MS));
+const msToSlider = (ms) => Math.round(Math.min(1, Math.max(0, (ms - SIM_START_MS) / (SIM_END_MS - SIM_START_MS))) * 10000);
 
 /* ===== Time controller ===== */
 let isPlaying = true;
@@ -95,167 +88,155 @@ sliderEl.addEventListener('input', () => { simMs = sliderToMs(sliderEl.value); i
 playBtn.addEventListener('click', () => { isPlaying = !isPlaying; lastRealMs = performance.now(); playBtn.textContent = isPlaying ? '⏸' : '▶︎'; });
 updateTimeUI();
 
-/* ---------- HUD + Picking ---------- */
+/* ---------- HUD + (flags-only) Picking ---------- */
 const hud = createHud?.();
+
+// move HUD to bottom-center
+const hudEl = document.getElementById('hud') || hud?.el; // whichever your HUD uses
+if (hudEl) {
+  hudEl.style.position = 'fixed';
+  hudEl.style.left = '50%';
+  hudEl.style.bottom = '16px';
+  hudEl.style.top = 'auto';                 // unset any top pinning
+  hudEl.style.transform = 'translateX(-50%)';
+  hudEl.style.pointerEvents = 'none';       // optional: clicks pass through
+}
+// Keep PickManager only for FLAGS. We won't register rockets anymore.
 const pick = new PickManager(renderer, camera, hud?.showInfo ?? (()=>{}), hud?.hideInfo ?? (()=>{}));
 
 /* ---------- Audio (optional) ---------- */
 try { createAudioButton?.({ src: '/audio/interstellar.mp3', volume: 0.25, loop: true }); } catch {}
 
-/* ---------- Rockets ---------- */
+/* ---------- Rockets (no click; emit events instead) ---------- */
 function moonPositionFn() { return moon ? moon.getWorldPosition(new THREE.Vector3()) : null; }
+
+let lastShownRocketId = null;
 const rockets = installRocketModule({
   THREE, scene, earth,
   orbitSlowdown: 4.0,
   ascentSlowdown: 2.0,
-  pickManager: pick,
+  pickManager: null,              // ← stop registering rockets for picking
   moonPositionFn,
+  onEvent: (ev) => {              // ← listen to rocket lifecycle
+    if (ev.type === 'launch-start') {
+      const who = (ev.astronauts || []).join(', ');
+      const lat = ev.lat != null ? `${ev.lat.toFixed(4)}°` : '';
+      const lon = ev.lon != null ? `${ev.lon.toFixed(4)}°` : '';
+      const where = (lat && lon) ? ` • ${lat}, ${lon}` : '';
+      const subtitle = [who, ev.description].filter(Boolean).join(' — ');
+      hud?.showInfo?.(`${ev.label || 'Launch'}${subtitle ? ` — ${subtitle}` : ''}${where}`);
+      lastShownRocketId = ev.id;
+    } else if (ev.type === 'rocket-deleted') {
+      if (lastShownRocketId === ev.id) { hud?.hideInfo?.(); lastShownRocketId = null; }
+    }
+  }
 });
 
-/* ===================== CSV ingestion ===================== */
+/* ===================== CSV ingestion (unchanged parsing) ===================== */
 async function loadText(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
   return res.text();
 }
 async function loadCSVWithFallback() {
-  const paths = [
-    '/data/influential_launches.csv',
-    '/influential_launches.csv',
-    './influential_launches.csv',
-  ];
+  const paths = ['/data/influential_launches.csv', '/influential_launches.csv', './influential_launches.csv'];
   let lastErr;
   for (const p of paths) {
-    try {
-      const t = await loadText(p);
-      console.info('[CSV] Loaded:', p);
-      return t;
-    } catch (e) { lastErr = e; console.warn('[CSV] Failed', p, e); }
+    try { return await loadText(p); } catch (e) { lastErr = e; }
   }
   throw lastErr ?? new Error('CSV not found in fallback paths');
 }
 
-// minimal CSV
+// tiny CSV + record builder
 function parseCSV(text) {
-  const rows = [];
-  let i = 0, field = '', row = [], inQ = false;
+  const rows = []; let i=0,f='',row=[],q=false;
   while (i < text.length) {
     const c = text[i++];
-    if (inQ) {
-      if (c === '"') { if (text[i] === '"') { field += '"'; i++; } else inQ = false; }
-      else field += c;
-    } else {
-      if (c === '"') inQ = true;
-      else if (c === ',') { row.push(field.trim()); field = ''; }
-      else if (c === '\n' || c === '\r') {
-        if (field.length || row.length) { row.push(field.trim()); rows.push(row); row = []; field = ''; }
-        if (c === '\r' && text[i] === '\n') i++;
-      } else field += c;
-    }
+    if (q) { if (c === '"') { if (text[i] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(f.trim()); f=''; }
+    else if (c === '\n' || c === '\r') { if (f.length || row.length) { row.push(f.trim()); rows.push(row); row=[]; f=''; } if (c === '\r' && text[i] === '\n') i++; }
+    else f += c;
   }
-  if (field.length || row.length) { row.push(field.trim()); rows.push(row); }
+  if (f.length || row.length) { row.push(f.trim()); rows.push(row); }
   return rows;
 }
+
+window.addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if (k === 'g' && firstLaunchMs) {
+    simMs = firstLaunchMs;
+    updateTimeUI();
+  }
+  if (k === ' ') { isPlaying = !isPlaying; playBtn.textContent = isPlaying ? '⏸' : '▶︎'; }
+  if (k === '1') simRate = 3600;
+  if (k === '2') simRate = 24*3600;
+  if (k === '3') simRate = 7*24*3600;
+});
 function recordsFromRows(rows) {
-  if (!rows || !rows.length) return [];
+  if (!rows?.length) return [];
   const h = rows[0] || [];
-  const headerOK = h.length >= 7 && /label/i.test(h[0]) && /lat/i.test(h[1]) && /lon/i.test(h[2]) && /date/i.test(h[3]);
-  const data = headerOK ? rows.slice(1) : rows;
+  const data = (h.length >= 7 && /label/i.test(h[0]) && /lat/i.test(h[1]) && /lon/i.test(h[2]) && /date/i.test(h[3])) ? rows.slice(1) : rows;
   const recs = [];
   for (let idx = 0; idx < data.length; idx++) {
-    const r = data[idx];
-    const [label, lat, lon, dateStr, astronautsStr, description, durationStr] = r;
+    const [label, lat, lon, dateStr, astronautsStr, description, durationStr] = data[idx];
     const whenMs = Date.parse(dateStr);
     const latNum = Number(lat), lonNum = Number(lon);
-    const durHours = Number(durationStr);
     if (!isFinite(whenMs) || !isFinite(latNum) || !isFinite(lonNum)) continue;
+    const durHours = Number(durationStr);
     const astronauts = (astronautsStr || '').split(/[;,\uFF0C]/).map(s => s.trim()).filter(Boolean);
     const durationMs = isFinite(durHours) && durHours > 0 ? durHours * 3600 * 1000 : 0;
-    recs.push({
-      whenMs, lat: latNum, lon: lonNum,
-      label: label || 'Launch',
-      astronauts, description: description || '',
-      durationMs,
-      orbitAlt: 0.8, azimuthDeg: 90, durationAscent: 220, color: 0xff9955, ascentSpeedScale: 1.0,
-      isMoon: /apollo\s*8|apollo\s*11|luna\s|trans-?lunar|moon/i.test(`${label} ${description}`),
-    });
+    recs.push({ whenMs, lat: latNum, lon: lonNum, label: label || 'Launch', astronauts, description: description || '',
+                durationMs, orbitAlt: 0.8, azimuthDeg: 90, durationAscent: 220, color: 0xff9955, ascentSpeedScale: 1.0,
+                isMoon: /apollo\s*8|apollo\s*11|luna\s|trans-?lunar|moon/i.test(`${label} ${description}`), });
   }
-  recs.sort((a, b) => a.whenMs - b.whenMs);
-  return recs.slice(0, 25);
+  recs.sort((a,b)=>a.whenMs-b.whenMs);
+  return recs.slice(0,25);
 }
 
-/* ---------- Country → flag mapping ---------- */
+/* ---------- Flags by country (unchanged) ---------- */
 const FLAG_PATHS = {
   china:  ['/public/flags/china.png',  '/flags/china.png',  '/china.png'],
   usa:    ['/public/flags/usa.png',    '/flags/usa.png',    '/usa.png'],
   guiana: ['/public/flags/guiana.png', '/flags/guiana.png', '/guiana.png'],
   kazakhstan: ['/public/flags/kazakhstan.png', '/flags/kazakhstan.png', '/kazakhstan.png'],
   generic:['/public/flags/launch.png', '/public/icons/launchpad.png', '/public/flags/flag.png'],
-  
 };
-
-// rough geo boxes for common launch regions
-function isInBox(lat, lon, {latMin, latMax, lonMin, lonMax}) {
-  return lat >= latMin && lat <= latMax && lon >= lonMin && lon <= lonMax;
-}
+const isInBox = (lat,lon,{latMin,latMax,lonMin,lonMax}) => lat>=latMin && lat<=latMax && lon>=lonMin && lon<=lonMax;
 function siteCountry(lat, lon) {
-  // Kourou, French Guiana (~tight box)
   if (isInBox(lat, lon, { latMin: 2.0,  latMax: 7.0,  lonMin: -55.5, lonMax: -50.0 })) return 'guiana';
-  // USA: Cape Canaveral (FL)
-  if (isInBox(lat, lon, { latMin: 24.0, latMax: 31.5, lonMin: -90.0, lonMax: -70.0 })) return 'usa';
-  // USA: Vandenberg (CA)
-  if (isInBox(lat, lon, { latMin: 32.0, latMax: 38.5, lonMin: -124.0, lonMax: -114.0 })) return 'usa';
-  // China (broad mainland bounds)
+  if (isInBox(lat, lon, { latMin: 24.0, latMax: 31.5, lonMin: -90.0, lonMax: -70.0 })) return 'usa'; // Canaveral
+  if (isInBox(lat, lon, { latMin: 32.0, latMax: 38.5, lonMin: -124.0, lonMax: -114.0 })) return 'usa'; // Vandenberg
   if (isInBox(lat, lon, { latMin: 18.0, latMax: 46.5, lonMin: 73.0,  lonMax: 135.0 })) return 'china';
-  if (isInBox(lat, lon, { latMin: 40.0, latMax: 50.5, lonMin: 60,  lonMax: 65.0 })) return 'kazakhstan'; 
+  if (isInBox(lat, lon, { latMin: 40.0, latMax: 50.5, lonMin: 60.0,  lonMax: 65.0 })) return 'kazakhstan';
   return 'generic';
-
-  
-
-
 }
-
-function pickFirstExisting(paths) {
-  // We can't probe existence here without extra requests; just return first path.
-  // Put your icons at /public/flags/… for zero-config.
-  return (paths && paths.length) ? paths[0] : '';
-}
-
-/* ---------- NEW: add a flag for every unique launch site ---------- */
-function round(n, places = 3) {
-  const f = Math.pow(10, places);
-  return Math.round(n * f) / f;
-}
+const pickFirstExisting = (paths) => (paths && paths.length) ? paths[0] : '';
+function round(n,p=3){const f=Math.pow(10,p);return Math.round(n*f)/f;}
 async function addLaunchFlagsUnique(recs) {
   if (!recs?.length) return;
-  const siteMap = new Map(); // key: "lat|lon" -> { lat, lon, labels[] }
+  const siteMap = new Map();
   for (const r of recs) {
-    const key = `${round(r.lat, 3)}|${round(r.lon, 3)}`;
-    if (!siteMap.has(key)) siteMap.set(key, { lat: r.lat, lon: r.lon, labels: [] });
+    const key = `${round(r.lat,3)}|${round(r.lon,3)}`;
+    if (!siteMap.has(key)) siteMap.set(key, { lat:r.lat, lon:r.lon, labels:[] });
     siteMap.get(key).labels.push(r.label);
   }
-
-  for (const [, site] of siteMap) {
-    const country = siteCountry(site.lat, site.lon);
-    const imageUrl = pickFirstExisting(FLAG_PATHS[country] || FLAG_PATHS.generic);
-
-    const samples = site.labels.slice(0, 2);
+  for (const [,site] of siteMap) {
+    const imageUrl = pickFirstExisting(FLAG_PATHS[siteCountry(site.lat, site.lon)] || FLAG_PATHS.generic);
+    const samples = site.labels.slice(0,2);
     const more = site.labels.length - samples.length;
-    const subtitle = samples.join(' • ') + (more > 0 ? ` • +${more} more` : '');
-
     await addFlagMarker({
       earth, texLoader, renderer,
       latDeg: site.lat, lonDeg: site.lon, radiusUnits: 2.0,
-      imageUrl,
-      flagSize: [0.22, 0.14],
+      imageUrl, flagSize: [0.22, 0.14],
       title: `Launch Site (${site.labels.length})`,
-      subtitle: subtitle || `${round(site.lat, 3)}°, ${round(site.lon, 3)}°`,
+      subtitle: samples.join(' • ') + (more>0 ? ` • +${more} more` : ''),
       pickManager: pick
     });
   }
 }
 
-/* ---------- Build launchQueue & add flags ---------- */
+/* ---------- Build launchQueue & flags ---------- */
 const launchQueue = [];
 let firstLaunchMs = null;
 
@@ -268,16 +249,10 @@ let firstLaunchMs = null;
     await addLaunchFlagsUnique(recs);
     updateDebug();
   } catch (e) {
-    console.warn('[CSV] Failed to load any CSV; seeding Sputnik-1 demo.', e);
-    const demo = {
-      whenMs: Date.UTC(1957, 9, 4, 19, 28, 34),
-      lat: 45.9203, lon: 63.3422,
-      label: 'Sputnik 1 (demo)',
-      astronauts: [], description: 'First artificial satellite; seed row (CSV missing)',
-      durationMs: 1000 * 3600 * 1000,
-      orbitAlt: 0.8, azimuthDeg: 90, durationAscent: 220, color: 0xff9955, ascentSpeedScale: 1.0,
-      isMoon: false,
-    };
+    console.warn('[CSV] CSV missing; seeding Sputnik-1 demo.', e);
+    const demo = { whenMs: Date.UTC(1957,9,4,19,28,34), lat:45.9203, lon:63.3422, label:'Sputnik 1 (demo)',
+      astronauts:[], description:'First artificial satellite; seed row', durationMs:1000*3600*1000,
+      orbitAlt:0.8, azimuthDeg:90, durationAscent:220, color:0xff9955, ascentSpeedScale:1.0, isMoon:false };
     launchQueue.push(demo);
     firstLaunchMs = demo.whenMs;
     await addLaunchFlagsUnique([demo]);
@@ -288,34 +263,12 @@ let firstLaunchMs = null;
 /* ---------- Next Launch control ---------- */
 function goToNextLaunch({ preRollMs = 5000 } = {}) {
   const next = launchQueue.length ? launchQueue[0] : null;
-  if (!next) {
-    const t = document.createElement('div');
-    t.textContent = 'No upcoming launches in the queue.';
-    t.style.cssText = 'position:fixed;left:50%;top:44px;transform:translateX(-50%);background:#111;color:#fff;padding:6px 10px;border:1px solid #333;border-radius:8px;z-index:9999';
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 1600);
-    return;
-  }
+  if (!next) { const t=document.createElement('div'); t.textContent='No upcoming launches.'; t.style.cssText='position:fixed;left:50%;top:44px;transform:translateX(-50%);background:#111;color:#fff;padding:6px 10px;border:1px solid #333;border-radius:8px;z-index:9999'; document.body.appendChild(t); setTimeout(()=>t.remove(),1600); return; }
   simMs = Math.max(SIM_START_MS, Math.min(next.whenMs - Math.max(0, preRollMs), SIM_END_MS));
-  updateTimeUI();
-  isPlaying = true; playBtn.textContent = '⏸';
-  smoothSetSimRate(120, 0.35);
+  updateTimeUI(); isPlaying = true; playBtn.textContent = '⏸'; smoothSetSimRate(120, 0.35);
 }
 nextBtn?.addEventListener('click', () => goToNextLaunch());
 window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'n') goToNextLaunch(); });
-
-/* ---------- Manual keys ---------- */
-window.addEventListener('keydown', (e) => {
-  const k = e.key.toLowerCase();
-  if (k === 'g' && firstLaunchMs) {
-    simMs = firstLaunchMs;
-    updateTimeUI();
-  }
-  if (k === ' ') { isPlaying = !isPlaying; playBtn.textContent = isPlaying ? '⏸' : '▶︎'; }
-  if (k === '1') simRate = 3600;
-  if (k === '2') simRate = 24*3600;
-  if (k === '3') simRate = 7*24*3600;
-});
 
 /* ---------- Debug overlay ---------- */
 const dbg = document.createElement('div');
@@ -353,7 +306,7 @@ renderer.setAnimationLoop(() => {
     const id = job.isMoon
       ? rockets.launchToMoonFromLatLon(job.lat, job.lon, {
           label: job.label, azimuthDeg: job.azimuthDeg, durationAscent: job.durationAscent,
-          ascentSpeedScale: job.ascentSpeedScale, transferSeconds: 3 * 24 * 3600, followSeconds: 10,
+          ascentSpeedScale: job.ascentSpeedScale, transferSeconds: 3*24*3600, followSeconds: 10,
           color: 0x66c2ff, astronauts: job.astronauts, description: job.description,
         })
       : rockets.launchFromLatLon(job.lat, job.lon, {
@@ -368,7 +321,6 @@ renderer.setAnimationLoop(() => {
     if (job.durationMs && isFinite(job.durationMs) && job.durationMs > 0) {
       rockets.scheduleDelete(date.getTime() + job.durationMs + 60*60*10000, id);
     }
-
     updateDebug();
   }
 

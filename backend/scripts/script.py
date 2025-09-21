@@ -1,0 +1,34 @@
+import pandas as pd, datetime as dt
+
+rows = [
+("Sputnik 1",45.9203,63.3422,"1957-10-04T19:28:34Z","", "First artificial satellite; start of Space Age", 1.7),
+("Luna 2",45.9203,63.3422,"1959-09-12T06:39:42Z","", "First human-made impact on the Moon", 36),
+("Vostok 1",45.9203,63.3422,"1961-04-12T06:07:00Z","Yuri Gagarin", "First human in space and Earth orbit", 1.8),
+("Mercury-Redstone 3 (Freedom 7)",28.5721,-80.6480,"1961-05-05T13:34:00Z","Alan Shepard", "First American in space (suborbital)", 0.3),
+("Gemini 4",28.5721,-80.6480,"1965-06-03T15:15:59Z","James McDivitt; Ed White", "First American spacewalk (EVA)", 97),
+("Gemini 8",28.5721,-80.6480,"1966-03-16T16:41:02Z","Neil Armstrong; David Scott", "First orbital docking (with Agena)", 10.8),
+("Apollo 8",28.6084,-80.6043,"1968-12-21T12:51:00Z","Frank Borman; Jim Lovell; Bill Anders", "First humans to orbit the Moon", 147),
+("Apollo 11",28.6084,-80.6043,"1969-07-16T13:32:00Z","Neil Armstrong; Buzz Aldrin; Michael Collins", "First crewed lunar landing", 195),
+("Apollo 13",28.6084,-80.6043,"1970-04-11T19:13:00Z","Jim Lovell; Jack Swigert; Fred Haise", "Successful failure; safe return after explosion", 143),
+("Skylab 1 (SL-1)",28.6084,-80.6043,"1973-05-14T17:30:00Z","", "First U.S. space station launched", 2),
+("Voyager 1",28.3968,-80.6057,"1977-09-05T12:56:00Z","", "Grand tour of the outer planets; interstellar probe", 2),
+("STS-1 (Columbia)",28.6084,-80.6043,"1981-04-12T12:00:03Z","John Young; Robert Crippen", "First Space Shuttle flight (reusable orbiter)", 54.5),
+("STS-31 (Hubble)",28.6084,-80.6043,"1990-04-24T12:33:51Z","Loren Shriver; Charles Bolden; Steven Hawley; Bruce McCandless II; Kathryn D. Sullivan", "Hubble Space Telescope deployment", 120),
+("Soyuz TM-31",45.9203,63.3422,"2000-10-31T07:52:47Z","Yuri Gidzenko; William Shepherd; Sergei Krikalev", "First crew to the International Space Station (Expedition 1)", 48),
+("Shenzhou 5",40.9606,100.2983,"2003-10-15T01:00:00Z","Yang Liwei", "First Chinese crewed spaceflight", 21),
+("SpaceShipOne Flight 15P",35.059,-118.152,"2004-06-21T13:45:00Z","Mike Melvill", "First privately funded human spaceflight", 0.5),
+("Falcon 1 Flight 4",9.398,167.483,"2008-09-28T23:15:00Z","", "First privately developed liquid-fueled rocket to reach orbit", 2),
+("STS-107 (Columbia)",28.6084,-80.6043,"2003-01-16T15:39:00Z","Rick Husband; William McCool; Michael Anderson; Ilan Ramon; Kalpana Chawla; David Brown; Laurel Clark", "Science mission; tragic loss on reentry", 384),
+("Falcon 9 ORBCOMM-2",28.561857,-80.577366,"2015-12-22T01:29:00Z","", "First orbital-class booster vertical landing (RTLS)", 1.5),
+("Falcon 9 CRS-8",28.561857,-80.577366,"2016-04-08T20:43:31Z","", "First successful droneship landing (ASDS)", 2),
+("Falcon Heavy Demo",28.561857,-80.577366,"2018-02-06T20:45:00Z","", "Heavy-lift demo; simultaneous booster landings", 6),
+("Crew Dragon Demo-2",28.6084,-80.6043,"2020-05-30T19:22:00Z","Robert Behnken; Douglas Hurley", "Return of U.S. crewed launches; commercial crew", 64),
+("Tianwen-1",19.6145,110.9510,"2020-07-23T12:41:15Z","", "China's first Mars mission (orbiter/lander/rover)", 10),
+("Mars 2020 (Perseverance)",28.3968,-80.6057,"2020-07-30T11:50:00Z","", "Perseverance rover to Mars; Ingenuity helicopter", 10),
+("Ariane 5 VA256 (JWST)",5.239,-52.768,"2021-12-25T12:20:00Z","", "James Webb Space Telescope launch", 4),
+]
+
+df = pd.DataFrame(rows, columns=["label","lat","lon","date","astronauts","description","duration"])
+out_path = "/mnt/data/influential_launches.csv"
+df.to_csv(out_path, index=False)
+out_path

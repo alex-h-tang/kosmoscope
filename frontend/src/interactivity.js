@@ -85,13 +85,12 @@ export class PickManager {
 // interactivity.js
 // interactivity.js
 export function createHud() {
-  const fontStack = `ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
   const info = document.createElement('div');
   info.id = 'hud-info';
   info.style.cssText = `
     position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
     background:transparent; color:#fff; padding:0; margin:0;
-    font:600 16px/1.25 ${fontStack};
+    font:600 16px/1.25 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     z-index:9998; pointer-events:none; display:none; will-change: contents, opacity;
   `;
@@ -100,31 +99,18 @@ export function createHud() {
   let hideTimer = null;
   let isSticky = false;
 
-  // Base: simRateBaseline = 3600 (slowest preset). We scale TTL by (simRate / simRateBaseline).
-  function showInfo(text, opts = {}) {
-    const {
-      sticky = false,
-      ttlMsAtSimRate3600 = 4000,   // 4s when simRate === 3600
-      simRate = 3600               // pass current simRate from app.js
-    } = opts;
-
+  function showInfo(text, { sticky = false, ttlMsAtSimRate3600 = 4000, simRate = 3600 } = {}) {
     isSticky = !!sticky;
-
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-
     info.textContent = text ?? '';
     info.style.display = text ? 'block' : 'none';
     info.style.opacity = '1';
 
+    // Only auto-hide if NOT sticky
     if (!isSticky && text) {
-      const simRateBaseline = 3600;
-      const scale = Math.max(0.1, simRate / simRateBaseline); // >= 0.1 just in case
+      const scale = Math.max(0.1, simRate / 3600);
       const ttlMs = Math.round(ttlMsAtSimRate3600 * scale);
-
-      hideTimer = setTimeout(() => {
-        info.style.opacity = '0';
-        setTimeout(() => { if (!isSticky) info.style.display = 'none'; }, 250);
-      }, ttlMs);
+      hideTimer = setTimeout(() => { hideInfo(); }, ttlMs);
     }
   }
 
@@ -132,7 +118,7 @@ export function createHud() {
     isSticky = false;
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     info.style.opacity = '0';
-    setTimeout(() => { if (!isSticky) info.style.display = 'none'; }, 250);
+    setTimeout(() => { if (!isSticky) info.style.display = 'none'; }, 200);
   }
 
   return { showInfo, hideInfo, el: info };

@@ -111,6 +111,10 @@ try { createAudioButton?.({ src: '/audio/interstellar.mp3', volume: 0.25, loop: 
 function moonPositionFn() { return moon ? moon.getWorldPosition(new THREE.Vector3()) : null; }
 
 let lastShownRocketId = null;
+let eduPanelForId   = null;     // panel “owner”
+let lastEduEventAt  = 0;        // last time we updated the panel
+const EDU_DEBOUNCE_MS = 180;
+let hudOrbitOwnerId   = null; 
 const rockets = installRocketModule({
   THREE, scene, earth,
   orbitSlowdown: 4.0,
@@ -118,24 +122,50 @@ const rockets = installRocketModule({
   pickManager: null,              // ← stop registering rockets for picking
   moonPositionFn,
   onEvent: (ev) => {
-    if (ev.type === 'launch-start') {
-      const who = (ev.astronauts || []).join(', ');
-      const lat = ev.lat != null ? `${ev.lat.toFixed(4)}°` : '';
-      const lon = ev.lon != null ? `${ev.lon.toFixed(4)}°` : '';
-      const where = (lat && lon) ? ` • ${lat}, ${lon}` : '';
-      const subtitle = [who, ev.description].filter(Boolean).join(' — ');
-      const msg = `${ev.label || 'Launch'}${subtitle ? ` — ${subtitle}` : ''}${where}`;
+  if (ev.type === 'launch-start') {
+    // (unchanged) sticky launch HUD you already have
+    const who = (ev.astronauts || []).join(', ');
+    const lat = ev.lat != null ? `${ev.lat.toFixed(4)}°` : '';
+    const lon = ev.lon != null ? `${ev.lon.toFixed(4)}°` : '';
+    const where = (lat && lon) ? ` • ${lat}, ${lon}` : '';
+    const subtitle = [who, ev.description].filter(Boolean).join(' — ');
+    const msg = `${ev.label || 'Launch'}${subtitle ? ` — ${subtitle}` : ''}${where}`;
+    hud?.showInfo?.(msg, { sticky: true });
+    lastShownRocketId = ev.id;
+  }
 
-      // make it sticky until rocket is actually deleted
-      hud?.showInfo?.(msg, { sticky: true });
-      lastShownRocketId = ev.id;
-    } else if (ev.type === 'rocket-deleted') {
-      if (lastShownRocketId === ev.id) {
-        hud?.hideInfo?.();
-        lastShownRocketId = null;
-      }
+  else if (ev.type === 'orbit-start') {
+    // Right panel only — do NOT touch bottom HUD
+    const summary = getYouthSummaryForLabel(ev.label);
+    eduPanelForId = ev.id;
+    lastEduEventAt = performance.now();
+    eduPanel.show(ev.label, summary || 'This mission is now in orbit. Explore its path around Earth!');
+  }
+
+  else if (ev.type === 'follow-start') {
+  // If this rocket already owns the panel OR no one owns it yet, show/update
+  if (eduPanelForId === ev.id || eduPanelForId == null) {
+    eduPanelForId = ev.id;
+    lastEduEventAt = performance.now();
+    const summary = getYouthSummaryForLabel(ev.label);
+    const extra = ' The vehicle is now orbiting near the Moon—watch how its path changes!';
+    eduPanel.show(ev.label, summary ? (summary + extra) : ('Now following the Moon.' + extra));
+  }
+  // (if a different rocket owns the panel, we ignore to avoid flicker/stealing)
+}
+
+  else if (ev.type === 'rocket-deleted') {
+    // Hide sticky launch HUD only if this rocket owned it
+    if (lastShownRocketId === ev.id) { hud?.hideInfo?.(); lastShownRocketId = null; }
+    // Hide the right panel only if this rocket owns it, with debounce
+    if (eduPanelForId === ev.id) {
+      const since = performance.now() - lastEduEventAt;
+      eduPanel.hide({ debounceMs: Math.max(EDU_DEBOUNCE_MS, 180 - since) });
+      eduPanelForId = null;
     }
   }
+}
+
 });
 
 /* ===================== CSV ingestion (unchanged parsing) ===================== */
@@ -152,7 +182,137 @@ async function loadCSVWithFallback() {
   }
   throw lastErr ?? new Error('CSV not found in fallback paths');
 }
+async function loadYouthSummariesCSV() {
+  // Look in common public paths (adjust if you serve it elsewhere)
+  const candidates = [
+    '/data/mission_summaries_youth.csv',
+    '/mission_summaries_youth.csv',
+    './mission_summaries_youth.csv'
+  ];
+  let lastErr;
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      return text;
+    } catch (e) { lastErr = e; }
+  }
+  console.warn('[edu] youth summaries CSV not found in default paths.');
+  if (lastErr) console.warn(lastErr);
+  return null;
+}
 
+function parseCSVToRows(text) {
+  if (!text) return [];
+  const rows = [];
+  let i = 0, field = '', row = [], inQ = false;
+  while (i < text.length) {
+    const c = text[i++];
+    if (inQ) {
+      if (c === '"') { if (text[i] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === ',') { row.push(field.trim()); field = ''; }
+      else if (c === '\n' || c === '\r') {
+        if (field.length || row.length) { row.push(field.trim()); rows.push(row); row = []; field = ''; }
+        if (c === '\r' && text[i] === '\n') i++;
+      } else field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field.trim()); rows.push(row); }
+  return rows;
+}
+
+function buildYouthSummaryMap(rows) {
+  if (!rows.length) return new Map();
+  const header = rows[0].map(h => h.toLowerCase().replace(/\W+/g,''));
+  const data = header.includes('label') || header.includes('mission') ? rows.slice(1) : rows;
+
+  const iLabel = header.indexOf('label') >= 0 ? header.indexOf('label') : 0;
+  const iSum   = header.indexOf('summaryeducation') >= 0 ? header.indexOf('summaryeducation')
+                 : header.indexOf('summary') >= 0 ? header.indexOf('summary') : 1;
+
+  const m = new Map();
+  for (const r of data) {
+    const label = (r[iLabel] || '').trim();
+    const summary = (r[iSum] || '').trim();
+    if (label && summary) m.set(label.toLowerCase(), summary);
+  }
+  return m;
+}
+
+/* ===================== Education Panel (right side) ===================== */
+// Add this near your HUD creation in app.js
+const eduPanel = (() => {
+  const wrap = document.createElement('aside');
+  wrap.id = 'edu-panel';
+  wrap.style.cssText = `
+    position: fixed;
+    right: 16px; top: 50%; transform: translateY(-50%);
+    width: min(420px, 28vw);
+    max-height: 70vh; overflow:auto;
+    padding: 12px 14px;
+    background: rgba(10,10,15,0.55);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 12px;
+    color: #f0f6ff; z-index: 9999;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.35);
+    backdrop-filter: blur(6px) saturate(120%);
+    opacity: 0; visibility: hidden; transition: opacity .18s ease, visibility 0s linear .18s;
+  `;
+  const title = document.createElement('div');
+  title.id = 'edu-title';
+  title.style.cssText = `font:700 15px/1.2 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin-bottom:6px; color:#cde3ff;`;
+  const body = document.createElement('div');
+  body.id = 'edu-body';
+  body.style.cssText = `font:400 14px/1.35 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; white-space:normal;`;
+  wrap.appendChild(title); wrap.appendChild(body);
+  document.body.appendChild(wrap);
+
+  let hideTimer = null;
+
+  function show(label, summary) {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    title.textContent = label || 'Mission';
+    body.textContent  = summary || 'No summary available.';
+    wrap.style.visibility = 'visible';
+    wrap.style.transition = 'opacity .18s ease, visibility 0s';
+    wrap.style.opacity = '1';
+  }
+  function hide({ debounceMs = EDU_DEBOUNCE_MS } = {}) {
+    if (hideTimer) { clearTimeout(hideTimer); }
+    hideTimer = setTimeout(() => {
+      wrap.style.transition = 'opacity .18s ease, visibility 0s linear .18s';
+      wrap.style.opacity = '0';
+      wrap.style.visibility = 'hidden';
+      hideTimer = null;
+    }, debounceMs);
+  }
+  return { show, hide, el: wrap };
+})();
+
+/* ===================== Wire everything together ===================== */
+let youthSummaryMap = new Map();
+(async () => {
+  const t = await loadYouthSummariesCSV();      // loads mission_summaries_youth.csv
+  youthSummaryMap = buildYouthSummaryMap(parseCSVToRows(t)); // Map<labelLower -> summary>
+})();
+
+// Helper to fetch a summary by mission label with a soft fallback
+function getYouthSummaryForLabel(label) {
+  if (!label) return '';
+  const key = String(label).toLowerCase();
+  if (youthSummaryMap.has(key)) return youthSummaryMap.get(key);
+
+  // very soft fuzzy: try without common punctuation/spaces
+  const norm = key.replace(/[^\w]/g,'');
+  for (const [k, v] of youthSummaryMap.entries()) {
+    if (k.replace(/[^\w]/g,'') === norm) return v;
+  }
+  return '';
+}
 // tiny CSV + record builder
 function parseCSV(text) {
   const rows = []; let i=0,f='',row=[],q=false;

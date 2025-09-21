@@ -228,244 +228,44 @@ function applyMat3(m, v) {
   };
 }
 
-// === CONSISTENT AXIS MAPPING (critical fix) ===
-// ECI/ECEF x→scene x, z→scene y, y→scene (−z)  (matches your marker mapping)
+// === CONSISTENT AXIS MAPPING ===
 function eciToThree(v) { return new THREE.Vector3(v.x, v.z, -v.y); }
 
-// ECI -> ECEF sub-satellite point (spherical Earth)
-function eciToSubpoint(rEci, jd) {
-  const θ = gmstRad(jd); // radians
-  const c = Math.cos(θ), s = Math.sin(θ);
-  // ECEF = R3(-GMST) * ECI
-  const x =  c * rEci.x + s * rEci.y;
-  const y = -s * rEci.x + c * rEci.y;
-  const z =  rEci.z;
-  const lon = Math.atan2(y, x);                 // [-π, π], East+
-  const lat = Math.atan2(z, Math.hypot(x, y));  // geocentric
-  return { lat, lon, x, y, z };
-}
-
-// ---- Exact epoch alignment: set Ω and M0 so that at epoch the subpoint is at (lat,lon) ----
-function alignElementsToLatLonAtEpoch(entry, latDeg, lonDeg) {
-  const st = entry.station;
-  const epochDate = new Date(st.epoch_s * 1000);
-  const jd = jdUTC(epochDate);
-
-  // Target ECEF unit vector from lat/lon (East-positive longitude)
-  const φ = THREE.MathUtils.degToRad(latDeg);
-  const λ = THREE.MathUtils.degToRad(lonDeg);
-  const cφ = Math.cos(φ), sφ = Math.sin(φ);
-  const cλ = Math.cos(λ), sλ = Math.sin(λ);
-  const u_ecef = { x: cφ*cλ, y: cφ*sλ, z: sφ };
-
-  // ECEF -> ECI at epoch: ECI = R3(+GMST) * ECEF
-  const θ = gmstRad(jd);
-  const c = Math.cos(θ), s = Math.sin(θ);
-  const rhat = {
-    x: c*u_ecef.x - s*u_ecef.y,
-    y: s*u_ecef.x + c*u_ecef.y,
-    z: u_ecef.z
-  };
-
-  // Known: inclination i; Unknowns: Ω (RAAN) and u (arg of latitude) at epoch.
-  const i = st.i_rad;
-  const si = Math.sin(i), ci = Math.cos(i);
-
-  // Solve Ω from plane constraint: ĥ · r̂ = 0, with ĥ = (si sinΩ, -si cosΩ, ci)
-  const Rxy = Math.hypot(rhat.x, rhat.y) || 1e-12;
-  const alpha = Math.atan2(rhat.y, rhat.x);
-  const sVal = THREE.MathUtils.clamp(-(ci/si) * (rhat.z / Rxy), -1, 1);
-  let Omega = alpha + Math.asin(sVal);
-
-  // u from:
-  //   sin u = r_z / sin i
-  //   cos u = r_x cosΩ + r_y sinΩ
-  const sinu = THREE.MathUtils.clamp(rhat.z / si, -1, 1);
-  const cosu = rhat.x * Math.cos(Omega) + rhat.y * Math.sin(Omega);
-  const u = Math.atan2(sinu, cosu);
-
-  // With ω as-is (you set 0), ν = u − ω. Convert ν -> E -> M.
-  const e = st.e;
-  const omega = st.argp_rad || 0;
-  const nu = u - omega;
-
-  const beta = Math.sqrt((1 - e) / (1 + e));
-  const E = 2 * Math.atan(Math.tan(nu / 2) * beta); // << correct relation
-  const M = E - e * Math.sin(E);
-
-  function wrap2pi(x){ x = x % (2*Math.PI); return x < 0 ? x + 2*Math.PI : x; }
-  st.raan_rad = wrap2pi(Omega);
-  st.M0_rad   = wrap2pi(M);
-}
-
-function wrapPi(x){ return Math.atan2(Math.sin(x), Math.cos(x)); }
-
-// Convert lat/lon (deg, lon East+) to Earth-local coords (Y up).
-function addSurfaceMarker(latDeg, lonDeg, radiusUnits = 2.0, color = 0x00ff88) {
-  const r   = radiusUnits * 1.002; // float above surface
-  const lat = THREE.MathUtils.degToRad(latDeg);
-  const lon = THREE.MathUtils.degToRad(lonDeg);
-
-  // Matches scene mapping: x = r cosφ cosλ, y = r sinφ, z = - r cosφ sinλ
-  const cosφ = Math.cos(lat), sinφ = Math.sin(lat);
-  const cosλ = Math.cos(lon), sinλ = Math.sin(lon);
-
-  const x = r * cosφ * cosλ;
-  const y = r * sinφ;
-  const z = -r * cosφ * sinλ;
-
-  const mark = new THREE.Mesh(
-    new THREE.SphereGeometry(0.03, 12, 12),
-    new THREE.MeshBasicMaterial({ color })
-  );
-  mark.position.set(x, y, z);
-  earth.add(mark);
-  return mark;
-
-}
-// Flag marker with custom image (horizontal banner, facing equator)
-// + elegant pole: tapered shaft, finial, and round base
-function addFlagMarker(
-  latDeg,
-  lonDeg,
-  radiusUnits = 2.0,
-  {
-    imageUrl = null,           // e.g. '/flags/kazakhstan.png'
-    flagSize = [0.16, 0.10],   // [width, height]
-    poleColor = 0xdedede,
-    finialColor = 0xd4af37,    // gold-ish
-    baseColor = 0x222222,
-    doubleSided = true,
-    flipY = true,
-    gapFromPole = 0.015,
-
-    // Pole & base styling
-    poleHeight = 0.28,
-    poleRadiusTop = 0.006,
-    poleRadiusBottom = 0.01,
-    baseRadius = 0.04,
-    baseHeight = 0.01,
-    finialRadius = 0.012
-  } = {}
-) {
+// For surface items (lat/lon in degrees, lon East+)
+function addFlagMarker(latDeg, lonDeg, radiusUnits = 2.0, { imageUrl=null, flagSize=[0.20,0.12] } = {}) {
   const r   = radiusUnits * 1.003;
   const lat = THREE.MathUtils.degToRad(latDeg);
   const lon = THREE.MathUtils.degToRad(lonDeg);
-
-  // Earth-local (Y up) mapping used throughout your scene.
   const cosφ = Math.cos(lat), sinφ = Math.sin(lat);
   const cosλ = Math.cos(lon), sinλ = Math.sin(lon);
   const x = r * cosφ * cosλ;
   const y = r * sinφ;
   const z = -r * cosφ * sinλ;
 
-  // Surface normal in Earth-local coords
-  const n = new THREE.Vector3(x, y, z).normalize();
-
   const grp = new THREE.Group();
-
-  // ---- Base (round plinth) ----
-  // Place so its bottom just kisses the ground (tiny embed to prevent z-fight)
-  const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(baseRadius, baseRadius, baseHeight, 24, 1, true),
-    new THREE.MeshStandardMaterial({ color: baseColor, metalness: 0.2, roughness: 0.6 })
-  );
-  base.position.y = baseHeight * 0.5 - 0.001;
-  grp.add(base);
-
-  // Optional bevel lip (very thin disk) for a classier look
-  const lip = new THREE.Mesh(
-    new THREE.CylinderGeometry(baseRadius * 1.06, baseRadius * 1.06, 0.004, 24),
-    new THREE.MeshStandardMaterial({ color: baseColor, metalness: 0.3, roughness: 0.5 })
-  );
-  lip.position.y = baseHeight + 0.002;
-  grp.add(lip);
-
-  // ---- Tapered pole ----
-  const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(poleRadiusTop, poleRadiusBottom, poleHeight, 20),
-    new THREE.MeshStandardMaterial({ color: poleColor, metalness: 0.1, roughness: 0.35 })
-  );
-  pole.position.y = baseHeight + poleHeight * 0.5;
-  grp.add(pole);
-
-  // ---- Finial (small sphere) ----
-  const finial = new THREE.Mesh(
-    new THREE.SphereGeometry(finialRadius, 16, 12),
-    new THREE.MeshStandardMaterial({ color: finialColor, metalness: 0.6, roughness: 0.25 })
-  );
-  finial.position.y = baseHeight + poleHeight + finialRadius * 0.9;
-  grp.add(finial);
-
-  // ---- Flag (horizontal banner: width +X, height +Y) ----
-  const [fw, fh] = flagSize;
-  const flagGeo = new THREE.PlaneGeometry(fw, fh);
-
-  let flagMat;
-  if (imageUrl) {
-    const tex = texLoader.load(
-      imageUrl,
-      (t) => {
-        t.colorSpace = THREE.SRGBColorSpace;
-        t.anisotropy = renderer.capabilities.getMaxAnisotropy();
-        t.flipY = flipY;
-      }
-    );
-    flagMat = new THREE.MeshBasicMaterial({
-      map: tex,
-      transparent: true,
-      side: doubleSided ? THREE.DoubleSide : THREE.FrontSide
-    });
-  } else {
-    flagMat = new THREE.MeshBasicMaterial({
-      color: 0xff0000,
-      side: doubleSided ? THREE.DoubleSide : THREE.FrontSide
-    });
-  }
-
-  const flag = new THREE.Mesh(flagGeo, flagMat);
-  // Left edge kisses pole; sits near the top of pole
-  flag.position.set(
-    fw * 0.5 + gapFromPole,
-    baseHeight + poleHeight - fh * 0.55,
-    0
-  );
-  // Keep horizontal (no Z-rotation)
-  grp.add(flag);
-
-  // 1) Align group +Y to the surface normal
-  grp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+  const n = new THREE.Vector3(x, y, z).normalize();
+  grp.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), n);
   grp.position.set(x, y, z);
 
-  // 2) Yaw the group so the flag faces the equator (along local meridian)
-  // Tangent toward geographic north at this point:
-  const tNorth = new THREE.Vector3(
-    -sinφ * cosλ,
-     cosφ,
-     sinφ * sinλ
-  ).normalize();
-  const towardEquator = (latDeg >= 0 ? tNorth.clone().negate() : tNorth);
-
-  const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(grp.quaternion);
-  const cross = new THREE.Vector3().crossVectors(fwd, towardEquator);
-  const dot = THREE.MathUtils.clamp(fwd.dot(towardEquator), -1, 1);
-  const sign = Math.sign(cross.dot(n));
-  const ang = Math.acos(dot) * (isNaN(sign) ? 1 : sign);
-  grp.rotateY(ang);
+  const [fw, fh] = flagSize;
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(fw, fh),
+    new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide })
+  );
+  plane.position.set(fw*0.5+0.015, 0.12, 0);
+  grp.add(plane);
 
   earth.add(grp);
   return grp;
 }
 
-
-// === Scene scale: keep your existing sizes ===
-const MEAN_LUNAR_AU = 384400 / 149597870.7; // ≈ 0.002569 AU
+// === Scene scale ===
+const MEAN_LUNAR_AU = 384400 / 149597870.7;
 const AU_TO_UNITS = (typeof moonDistance !== 'undefined' ? moonDistance : 5) / MEAN_LUNAR_AU;
 
-// Time scale
+// Time scale (start around Sputnik era so we can see scheduled events)
 let speedMultiplier = 1000;
 const realStart = Date.now();
-// start a bit before launch so you can see activation
 const EPOCH_START_MS = Date.UTC(1957, 9, 4, 18, 0, 0, 0);
 function simDate() {
   const elapsed = Date.now() - realStart;
@@ -531,7 +331,6 @@ function mul3(M,v){
            z:M[2][0]*v.x + M[2][1]*v.y + M[2][2]*v.z };
 }
 function eciKmToThreeUnits(p){
-  // *** CRITICAL: match surface mapping handedness ***
   return new THREE.Vector3(p.x, p.z, -p.y).multiplyScalar(KM_TO_UNITS_LEO);
 }
 function j2Rates(a,e,i){
@@ -563,7 +362,6 @@ function addStationKepler({
   name='Station', a_km, e=0.001, i_deg,
   raan_deg=0, argp_deg=0, M0_deg=0,
   epoch=new Date(), color=0xff5555,
-  // visibility window
   startUTC=null, endUTC=null
 }){
   const station = {
@@ -597,13 +395,7 @@ function attachTrailToStation(entry, { length = 100, color = 0xffffff, opacity =
   line.frustumCulled = false;
   scene.add(line);
 
-  entry.trail = {
-    line,
-    geom,
-    positions,
-    max: length,
-    points: [],
-  };
+  entry.trail = { line, geom, positions, max: length, points: [] };
 }
 function updateTrail(entry, posVec3) {
   const t = entry.trail;
@@ -612,17 +404,12 @@ function updateTrail(entry, posVec3) {
   if (t.points.length > t.max) t.points.shift();
   const n = t.points.length;
   for (let i = 0; i < n; i++) {
-    const p = t.points[i];
-    const k = i * 3;
-    t.positions[k]     = p.x;
-    t.positions[k + 1] = p.y;
-    t.positions[k + 2] = p.z;
+    const p = t.points[i]; const k = i * 3;
+    t.positions[k] = p.x; t.positions[k + 1] = p.y; t.positions[k + 2] = p.z;
   }
   t.geom.setDrawRange(0, n);
   t.geom.attributes.position.needsUpdate = true;
 }
-
-// visibility helpers
 function stationActiveAt(entry, date) {
   const t = date.getTime() / 1000;
   return (t >= entry.station.start_s) && (t <= entry.station.end_s);
@@ -637,7 +424,7 @@ function clearTrail(entry) {
 // Example station (ISS-like)
 const issEntry = addStationKepler({
   name: 'ISS',
-  a_km: EARTH_RADIUS_KM + 420, // ~420 km altitude
+  a_km: EARTH_RADIUS_KM + 420,
   e:    0.001,
   i_deg:51.64,
   raan_deg: 0,
@@ -645,56 +432,286 @@ const issEntry = addStationKepler({
   M0_deg:   0,
   epoch: new Date(Date.UTC(2025,0,1,0,0,0)),
   color: 0xffffff,
-  startUTC: new Date(Date.UTC(1998,10,20,6,40,0)), // 1998-11-20T06:40Z
+  startUTC: new Date(Date.UTC(1998,10,20,6,40,0)),
   endUTC:   null
 });
 attachTrailToStation(issEntry, { length: 335, color: 0xbebebe, opacity: 0.6 });
 
-// Sputnik 1 — small red sphere + modest trail
+// Sputnik 1 — red dot + short trail
 const sputnikEntry = addStationKepler({
   name: 'Sputnik 1',
-  a_km: 6955.2,      // semi-major axis (km)
-  e:    0.05201,     // eccentricity
-  i_deg:65.10,       // inclination (deg)
+  a_km: 6955.2,
+  e:    0.05201,
+  i_deg:65.10,
   raan_deg: 0,
   argp_deg: 0,
   M0_deg:   0,
-  epoch:   new Date(Date.UTC(1957, 9, 4, 19, 28, 34)), // 1957-10-04T19:28:34Z
+  epoch:   new Date(Date.UTC(1957, 9, 4, 19, 28, 34)),
   color: 0xff2b2b,
   startUTC: new Date(Date.UTC(1957, 9, 4, 19, 28, 34)),
-  endUTC:   new Date(Date.UTC(1958, 0, 4, 0, 0, 0))   // burned up on reentry
+  endUTC:   new Date(Date.UTC(1958, 0, 4, 0, 0, 0))
 });
-// **Analytic epoch alignment** so the subpoint is Baikonur at epoch:
-alignElementsToLatLonAtEpoch(sputnikEntry, 45.9203, 63.3422);
 attachTrailToStation(sputnikEntry, { length: 20, color: 0xff2b2b, opacity: 0.5 });
 
-// Baikonur markers
+// Baikonur marker (we’ll launch from here)
 const SPUTNIK_LAUNCH_LAT = 45.9203;
 const SPUTNIK_LAUNCH_LON = 63.3422;
-addFlagMarker(45.9203, 63.3422, 2.0, {
-  imageUrl: '/public/flags/kazakhstan.png',
-  flagSize: [0.20, 0.12],   // wider banner
+addFlagMarker(SPUTNIK_LAUNCH_LAT, SPUTNIK_LAUNCH_LON, 2.0, {});
+
+// ===== ROCKET MODULE =====
+function installRocketModule({ scene, earth }) {
+  const EARTH_R = 2.0;
+  const rockets = [];
+
+  // helpers
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function smootherstep(a, b, t) { const x = clamp((t - a) / (b - a), 0, 1); return x*x*x*(x*(x*6 - 15) + 10); }
+  
+  function latLonToLocal(latDeg, lonDeg, r = 2.0) {
+  const φ = THREE.MathUtils.degToRad(latDeg);                      // latitude
+  const λ = THREE.MathUtils.degToRad(lonDeg + LON_OFFSET_DEG);     // longitude + offset
+
+  // X to lon=0°, Z to lon=+90°E (right-handed), Y up (lat)
+  const cosφ = Math.cos(φ), sinφ = Math.sin(φ);
+  const cosλ = Math.cos(λ), sinλ = Math.sin(λ);
+
+  // NOTE: z has a minus so +λ (East) goes toward -Z, which matches your eciToThree mapping.
+  const x = r * cosφ * cosλ;
+  const y = r * sinφ;
+  const z = -r * cosφ * sinλ;
+  return new THREE.Vector3(x, y, z);
+}
+
+  function getSurfaceFrame(latDeg, lonDeg) {
+    const pad = latLonToLocal(latDeg, lonDeg, EARTH_R);
+    const up = pad.clone().normalize();
+    // geographic “north” tangent on sphere
+    const lat = THREE.MathUtils.degToRad(latDeg);
+    const lon = THREE.MathUtils.degToRad(lonDeg);
+    const north = new THREE.Vector3(
+      -Math.sin(lat) * Math.cos(lon),
+       Math.cos(lat),
+       Math.sin(lat) * Math.sin(lon)
+    ).normalize();
+    const east = north.clone().cross(up).normalize();
+    return { pad, up, north, east };
+  }
+
+  // quadratic Bézier utilities
+  function quadPoint(A,B,C,t){ const omt=1-t; return A.clone().multiplyScalar(omt*omt).add(B.clone().multiplyScalar(2*omt*t)).add(C.clone().multiplyScalar(t*t)); }
+  function quadTangent(A,B,C,t){ const t1=B.clone().sub(A).multiplyScalar(2*(1-t)); const t2=C.clone().sub(B).multiplyScalar(2*t); return t1.add(t2).normalize(); }
+
+  // create a rocket mesh + flame
+  function createRocketMesh(color = 0xffffff) {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.22, 12), new THREE.MeshPhongMaterial({ color, emissive: 0x111111 }));
+    body.rotation.x = Math.PI * 0.5; // nose forward on +X
+    g.add(body);
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.18, 8), new THREE.MeshBasicMaterial({ color: 0xffaa33 }));
+    flame.position.z = -0.11; flame.rotation.x = Math.PI;
+    body.add(flame);
+    return g;
+  }
+
+  /**
+   * Launch from lat/lon at scheduled UTC time:
+   * - Bézier ascent until t1 = t0 + duration
+   * - Then circular orbit at (EARTH_R + orbitAlt) with given period
+   */
+  function scheduleLaunchUTC(utcWhen, {
+    lat, lon,
+    durationSimSec = 220,
+    apexUp = 0.9,
+    downrange = 1.2,
+    orbitAlt = 2.0,
+    orbitPeriodSimSec = 600,
+    pathColor = 0xffa64d
+  }) {
+    const t0 = (utcWhen instanceof Date) ? utcWhen.getTime() : new Date(utcWhen).getTime();
+    if (!Number.isFinite(t0)) { console.warn('scheduleLaunchUTC: bad date', utcWhen); return; }
+
+    // geometry for path
+    const arcSegs = 160;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array((arcSegs + 1) * 3), 3));
+    geo.setDrawRange(0, 0);
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: pathColor, transparent: true, opacity: 0.9 }));
+    line.frustumCulled = false;
+    scene.add(line);
+
+    const rocket = createRocketMesh(0xffffff);
+    rocket.visible = false;
+    scene.add(rocket);
+
+    // will compute A,B,C lazily on first frame after t0 to use current Earth rotation
+    const state = {
+      t0, t1: t0 + durationSimSec * 1000,
+      lat, lon, apexUp, downrange,
+      orbitAlt, orbitPeriodSimSec,
+      A: null, B: null, C: null,
+      line, geo, positions: geo.attributes.position.array,
+      rocket, phase0: 0, // orbit phase chosen at insertion
+      inOrbit: false, dead: false
+    };
+    rockets.push(state);
+  }
+
+  function update(dateUTC) {
+    const now = dateUTC.getTime();
+    for (let i = rockets.length - 1; i >= 0; i--) {
+      const r = rockets[i];
+      if (r.dead) continue;
+
+      // Before t0: invisible
+      if (now < r.t0) { r.rocket.visible = false; continue; }
+
+      // Lazily build ascent geometry at first activation (Earth has rotated)
+      if (!r.A) {
+        const { pad, up, east } = getSurfaceFrame(r.lat, r.lon);
+        const A = pad.clone().add(up.clone().multiplyScalar(0.02));
+        const B = pad.clone().add(up.clone().multiplyScalar(r.apexUp)).add(east.clone().multiplyScalar(r.downrange * 0.6));
+        const C = up.clone().multiplyScalar(EARTH_R + r.orbitAlt).add(east.clone().multiplyScalar(r.downrange * 0.6));
+        r.A = A; r.B = B; r.C = C;
+        r.rocket.visible = true;
+      }
+
+      const T = (now - r.t0) / (r.t1 - r.t0);
+      if (T <= 1) {
+        // ASCENT (Bézier)
+        const te = smootherstep(0, 1, clamp(T,0,1));
+        const pos = quadPoint(r.A, r.B, r.C, te);
+        const tan = quadTangent(r.A, r.B, r.C, te);
+        r.rocket.position.copy(pos);
+        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1,0,0), tan.normalize());
+        r.rocket.quaternion.copy(q);
+
+        // grow path progressively
+        const steps = Math.max(2, Math.floor(te * 160) + 1);
+        for (let k = 0; k < steps; k++) {
+          const u = (k / 160) * te;
+          const p = quadPoint(r.A, r.B, r.C, u);
+          const idx = k * 3;
+          r.positions[idx] = p.x; r.positions[idx + 1] = p.y; r.positions[idx + 2] = p.z;
+        }
+        r.geo.setDrawRange(0, steps);
+        r.geo.attributes.position.needsUpdate = true;
+
+      } else {
+        // ORBIT PHASE (simple circular in plane defined at insertion)
+        if (!r.inOrbit) {
+          // Define orbital frame at C: radial = Ĉ, tangential = (east-ish from A/B), normal = radial × tangential
+          const radial = r.C.clone().normalize();
+          // approximate tangential using last ascent tangent
+          const tanEnd = quadTangent(r.A, r.B, r.C, 1).normalize();
+          const normal = new THREE.Vector3().crossVectors(radial, tanEnd).normalize();
+          const tangential = new THREE.Vector3().crossVectors(normal, radial).normalize();
+
+          r.orbit = { radial, tangential, normal, R: r.C.length() };
+          r.phase0 = 0;
+          r.inOrbit = true;
+
+          // fade the ascent path a bit
+          r.line.material.opacity = 0.55;
+        }
+
+        const ω = 2 * Math.PI / r.orbitPeriodSimSec; // rad/s (sim)
+        const tOrbit = (now - r.t1) / 1000;
+        const θ = r.phase0 + ω * tOrbit;
+
+        const cos = Math.cos(θ), sin = Math.sin(θ);
+        const pos = r.orbit.radial.clone().multiplyScalar(cos * r.orbit.R)
+                    .add(r.orbit.tangential.clone().multiplyScalar(sin * r.orbit.R));
+
+        r.rocket.position.copy(pos);
+
+        // orient rocket along velocity (tangent)
+        const velDir = r.orbit.tangential.clone().multiplyScalar(cos).negate()
+                       .add(r.orbit.radial.clone().multiplyScalar(sin));
+        velDir.normalize();
+        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1,0,0), velDir);
+        r.rocket.quaternion.copy(q);
+
+        // Optional: draw a faint orbit hint (first time only)
+        if (!r.orbitLine) {
+          const og = new THREE.BufferGeometry();
+          const N = 256;
+          const arr = new Float32Array((N + 1) * 3);
+          for (let k = 0; k <= N; k++) {
+            const a = (2*Math.PI * k) / N;
+            const p = r.orbit.radial.clone().multiplyScalar(Math.cos(a)*r.orbit.R)
+                      .add(r.orbit.tangential.clone().multiplyScalar(Math.sin(a)*r.orbit.R));
+            const j = k*3; arr[j]=p.x; arr[j+1]=p.y; arr[j+2]=p.z;
+          }
+          og.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+          const om = new THREE.LineBasicMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.35 });
+          r.orbitLine = new THREE.Line(og, om); r.orbitLine.frustumCulled = false;
+          scene.add(r.orbitLine);
+        }
+      }
+    }
+  }
+
+  return { scheduleLaunchUTC, update };
+}
+
+const rockets = installRocketModule({ scene, earth });
+
+// ====== SIMPLE SCHEDULER (UTC) ======
+const scheduledJobs = []; // { whenMs, cb, fired }
+function atUTC(when, fn) {
+  const ms = (when instanceof Date) ? when.getTime() : new Date(when).getTime();
+  if (!Number.isFinite(ms)) return;
+  scheduledJobs.push({ whenMs: ms, cb: fn, fired: false });
+}
+let prevSimMs = null;
+function runScheduler(prevMs, nowMs) {
+  if (prevMs === null) return;
+  const lo = Math.min(prevMs, nowMs), hi = Math.max(prevMs, nowMs);
+  for (const j of scheduledJobs) {
+    if (!j.fired && j.whenMs > lo && j.whenMs <= hi) { j.fired = true; j.cb(); }
+  }
+}
+
+// === Seed a couple of launches ===
+// 1) Baikonur: launch a few minutes after Sputnik epoch
+atUTC(new Date(Date.UTC(1957, 9, 4, 19, 33, 0)), () => {
+  rockets.scheduleLaunchUTC(new Date(Date.UTC(1957, 9, 4, 19, 33, 0)), {
+    lat: SPUTNIK_LAUNCH_LAT,
+    lon: SPUTNIK_LAUNCH_LON,
+    durationSimSec: 220,
+    apexUp: 1.1,
+    downrange: 1.4,
+    orbitAlt: 2.0,             // ~LEO above your 2.0-unit Earth
+    orbitPeriodSimSec: 600,    // ~10 sim min
+    pathColor: 0xffa64d
+  });
 });
-// USA — Cape Canaveral (Mercury/Gemini/Apollo 7) + KSC (Apollo/Shuttle/Dragon/Orion)
-addFlagMarker(28.4360,  -80.5680, 2.0, { imageUrl: '/public/flags/usa.png',    flagSize: [0.20, 0.12] }); // LC-5  (Mercury-Redstone MR-3/MR-4)
 
-// China — Jiuquan (all Shenzhou crewed launches)
-addFlagMarker(40.9606, 100.2983, 2.0, { imageUrl: '/public/flags/china.png',   flagSize: [0.20, 0.12] }); // JSLC LA-4 / Pad 921
-
-// USA — suborbital crewed (historic & modern)
-addFlagMarker(35.0590, -118.1530, 2.0, { imageUrl: '/public/flags/usa.png',    flagSize: [0.20, 0.12] }); // Edwards AFB AND Mojave Air & Space Port (SpaceShipOne, 2004)
-addFlagMarker(32.9899, -106.9740, 2.0, { imageUrl: '/public/flags/usa.png',    flagSize: [0.20, 0.12] }); // Spaceport America (Virgin Galactic)
-addFlagMarker(31.4420, -104.7570, 2.0, { imageUrl: '/public/flags/usa.png',    flagSize: [0.20, 0.12] }); // Blue Origin Launch Site One (Van Horn, TX)
-
-/* ------------------------------ */
+// 2) Another launch later the same day
+atUTC(new Date(Date.UTC(1957, 9, 4, 21, 0, 0)), () => {
+  rockets.scheduleLaunchUTC(new Date(Date.UTC(1957, 9, 4, 21, 0, 0)), {
+    lat: SPUTNIK_LAUNCH_LAT,
+    lon: SPUTNIK_LAUNCH_LON,
+    durationSimSec: 200,
+    apexUp: 0.9,
+    downrange: 1.2,
+    orbitAlt: 2.3,
+    orbitPeriodSimSec: 750,
+    pathColor: 0x66c2ff
+  });
+});
 
 // ---------- Animate ----------
 renderer.setAnimationLoop(() => {
-  // Simulated time
+  // Sim time
   const date = simDate();
+  const simMsNow = date.getTime();
+  runScheduler(prevSimMs, simMsNow);
+  prevSimMs = simMsNow;
+
   utcHud.textContent = formatUTC(date);
 
-  // Sim dt in seconds (based on simulated clock)
+  // Sim dt
   const simMs = date.getTime();
   const dtSimSec = (_prevSimMs === null) ? 0 : (simMs - _prevSimMs) / 1000;
   _prevSimMs = simMs;
@@ -702,16 +719,14 @@ renderer.setAnimationLoop(() => {
   const jd   = jdUTC(date);
   const T    = centuriesTT(jd);
 
-  // Ephemerides (J2000 ECI)
+  // Ephemerides
   const sunJ  = sunEci(T);
   const moonJ = moonEci(T);
-
-  // Precess to mean-of-date ECI
   const P = precessionMatrix(T);
   const sunMOD  = applyMat3(P, sunJ);
   const moonMOD = applyMat3(P, moonJ);
 
-  // --- Sun: direction-only, small radius for shadows ---
+  // Sun
   const sunDir = eciToThree(sunMOD).normalize();
   const sunR   = 12;
   const sunPos = sunDir.multiplyScalar(sunR);
@@ -720,7 +735,7 @@ renderer.setAnimationLoop(() => {
   sun.target.position.set(0, 0, 0);
   sun.target.updateMatrixWorld();
 
-  // --- Moon: true position (scaled) + tidal locking w/ adjustable roll ---
+  // Moon
   const moonPos = eciToThree(moonMOD).multiplyScalar(AU_TO_UNITS);
   moon.position.copy(moonPos);
   moon.lookAt(0, 0, 0);
@@ -730,22 +745,24 @@ renderer.setAnimationLoop(() => {
     moon.rotateOnAxis(_toEarth, roll);
   }
 
-  // --- Stations: propagate, respect time windows, update contrails ---
+  // Stations
   for (const s of stations){
     const active = stationActiveAt(s, date);
     s.dot.visible = active;
     if (!active) { clearTrail(s); continue; }
-
     const rECI_km = propagateKepler(s.station, date);
-    const pos = eciKmToThreeUnits(rECI_km); // uses corrected mapping (x, z, -y)
+    const pos = eciKmToThreeUnits(rECI_km);
     s.dot.position.copy(pos);
     updateTrail(s, pos);
   }
 
-  // --- Earth spin: tilt + sidereal rotation (GMST) ---
+  // Earth spin
   earth.rotation.set(0, 0, 0);
   earth.rotateZ(THREE.MathUtils.degToRad(23.4));
   earth.rotateY(gmstRad(jd));
+
+  // Rockets (ascent + orbit)
+  rockets.update(date);
 
   controls.update();
   renderer.render(scene, camera);

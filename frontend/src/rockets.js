@@ -300,6 +300,7 @@ export function installRocketModule({
           r.orbit = { center, R, radial, tangent, theta:0, omega };
           r.ring  = createOrbitRing(center, radial, tangent, R, 0x888888, 128);
           r.phase = 'ORBIT';
+          onEvent && onEvent({ type: 'orbit-start', id: r.id, label: r.label });
           if (r.line) r.line.material.opacity = 0.55;
         }
       }
@@ -407,7 +408,7 @@ export function installRocketModule({
           if (Math.abs(up.dot(radial)) > 0.95) radial.set(0, 0, 1);
           const u = up.clone().cross(radial).normalize();
           const v = radial.clone().cross(u).normalize();
-          const periodSec = 10.0;
+          const periodSec = 0.0005;
           const omega = (2*Math.PI) / periodSec;
 
           r.follow = {
@@ -419,6 +420,15 @@ export function installRocketModule({
             t1: nowMs + (r.followSeconds ?? 5) * 1000,
           };
           r.phase = 'FOLLOW_MOON';
+
+          // ✅ NEW: notify the app so it can show the right-side summary for Moon paths
+          onEvent && onEvent({
+            type: 'follow-start',
+            id: r.id,
+            label: r.label,
+            description: r.description,
+            astronauts: r.astronauts
+          });
         }
       }
 
@@ -439,11 +449,6 @@ export function installRocketModule({
           if (r.line.material.opacity < 0.05) {
             scene.remove(r.line); r.line.geometry.dispose(); r.line.material.dispose(); r.line = null;
           }
-        }
-
-        if (nowMs >= r.follow.t1) {
-          deleteById(r.id);
-          continue;
         }
       }
     }

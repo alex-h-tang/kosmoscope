@@ -41,12 +41,9 @@ kosmoscope/
 # How to run
 
 ```
-git clone
-
+git clone https://github.com/alex-h-tang/kosmoscope.git
 cd frontend
-
 npm install
-
 npm run dev
 
 ```

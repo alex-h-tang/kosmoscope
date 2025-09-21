@@ -53,7 +53,8 @@ export class PickManager {
 
     const hits = this.raycaster.intersectObjects(this.pickables, false);
     const grp = hits.length ? (hits[0].object.userData.pickParent || null) : null;
-    this.setHovered(grp && grp.userData?.meta?.kind === 'flag' ? grp : null);
+    const k = grp?.userData?.meta?.kind;
+    this.setHovered(grp && (k === 'flag' || k === 'rocket') ? grp : null);
   }
 
   onClick() {

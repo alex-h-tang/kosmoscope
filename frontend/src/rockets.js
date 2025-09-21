@@ -1,24 +1,24 @@
-// rockets.js — smooth ascent → (slow) orbit, nicer ship, timed deletion, ascent/orbit slowdown knobs
+// rockets.js — LEO + TLI + lunar follow; clickable metadata with astronauts; slowdowns; timed deletion
 import * as THREE_NS from 'three';
 
 export function installRocketModule({
   THREE = THREE_NS,
   scene,
   earth,
-  orbitSlowdown = 3.0, // >1 = slower orbit
-  ascentSlowdown = 1.0 // >1 = longer/slower ascent (global)
+  orbitSlowdown = 3.0,   // >1 = slower orbit
+  ascentSlowdown = 1.0,  // >1 = longer/slower ascent
+  pickManager = null,    // optional: { register(group, meta) }
+  moonPositionFn = null, // optional: () => THREE.Vector3 | null (WORLD coords of Moon)
 }) {
   const EARTH_R = 2.0;
   const ARC_SEGS = 140;
 
   const rockets = [];
+  const deleteQueue = [];
   let prevSimMs = null;
   let nextId = 1;
 
-  // timed deletion queue: [{ atMs, id: number|null }]
-  const deleteQueue = [];
-
-  /* ---------- math helpers ---------- */
+  /* ---------- helpers ---------- */
   const clamp01  = (t) => Math.max(0, Math.min(1, t));
   const smoother = (t) => { t = clamp01(t); return t*t*t*(t*(t*6 - 15) + 10); };
 
@@ -74,10 +74,10 @@ export function installRocketModule({
     return line;
   }
 
-  // Visual Kepler-ish period: T ∝ R^(3/2)
   function orbitPeriodGuess(R_units) {
-    const R0 = 4.0, T0 = 5400; // ~ LEO 90min at ~2*EarthR units
+    const R0 = 4.0, T0 = 5400;
     return T0 * Math.pow(Math.max(R_units, R0) / R0, 1.5);
+    // ~90 min at R≈4 units, scaled with Kepler's 3rd law
   }
 
   function planAscent(frame, { orbitAlt, azimuthDeg }) {
@@ -88,7 +88,6 @@ export function installRocketModule({
                           .add(north.clone().multiplyScalar(Math.cos(az)))
                           .normalize();
 
-    // steeper loft → visible climb before pitch-over
     const A = pad.clone().add(up.clone().multiplyScalar(0.03));
     const B = pad.clone().add(up.clone().multiplyScalar(orbitAlt * 1.05))
                          .add(downrange.clone().multiplyScalar(orbitAlt * 0.35));
@@ -107,7 +106,6 @@ export function installRocketModule({
     return line;
   }
 
-  // nicer spaceship
   function createSpaceshipMesh({
     hullColor = 0xcfd4da,
     accentColor = 0xffb259,
@@ -165,56 +163,49 @@ export function installRocketModule({
     return g;
   }
 
-  /* ---------- create / destroy ---------- */
+  /* ---------- create/destroy & deletion ---------- */
   function destroyRecord(rec) {
     if (!rec) return;
     if (rec.rocket?.parent) rec.rocket.parent.remove(rec.rocket);
-    if (rec.line)  { scene.remove(rec.line);  rec.line.geometry.dispose(); rec.line.material.dispose(); rec.line = null; }
-    if (rec.ring)  { scene.remove(rec.ring);  rec.ring.geometry.dispose(); rec.ring.material.dispose(); rec.ring = null; }
+    if (rec.line)  { scene.remove(rec.line);  rec.line.geometry?.dispose(); rec.line.material?.dispose(); rec.line = null; }
+    if (rec.ring)  { scene.remove(rec.ring);  rec.ring.geometry?.dispose(); rec.ring.material?.dispose(); rec.ring = null; }
     rec.rocket = null;
   }
 
   function deleteById(id) {
-  const idx = rockets.findIndex(r => r.id === id);
-  if (idx === -1) return false;
-  const rec = rockets[idx];
-  destroyRecord(rec);         // tear down meshes/materials safely
-  rockets.splice(idx, 1);
-  return true;
-}
+    const idx = rockets.findIndex(r => r.id === id);
+    if (idx === -1) return false;
+    destroyRecord(rockets[idx]);
+    rockets.splice(idx, 1);
+    return true;
+  }
   function deleteAll() {
     for (const r of rockets) destroyRecord(r);
     rockets.length = 0;
   }
 
-  // timed deletions (UTC ms)
   function scheduleDelete(atMs, id = null) {
-  const t = Number(atMs);
-  if (!isFinite(t)) {
-    console.warn('[rockets] scheduleDelete: invalid time', atMs);
-    return false;
+    const t = Number(atMs);
+    if (!isFinite(t)) { console.warn('[rockets] scheduleDelete: invalid time', atMs); return false; }
+    if (id !== null && !rockets.some(r => r.id === id)) { console.warn('[rockets] scheduleDelete: no rocket', id); return false; }
+    if (deleteQueue.some(job => job.atMs === t && job.id === id)) return true;
+    deleteQueue.push({ atMs: t, id });
+    deleteQueue.sort((a, b) => a.atMs - b.atMs);
+    return true;
   }
-  if (id !== null && !rockets.some(r => r.id === id)) {
-    console.warn('[rockets] scheduleDelete: no rocket with id', id);
-    return false;
-  }
-  // de-dupe: don't push exact duplicates
-  if (deleteQueue.some(job => job.atMs === t && job.id === id)) return true;
+  const scheduleDeleteAll = (atMs) => scheduleDelete(atMs, null);
 
-  deleteQueue.push({ atMs: t, id });
-  deleteQueue.sort((a, b) => a.atMs - b.atMs);
-  return true;
-}
-
-  /* ---------- public: launch ---------- */
+  /* ---------- public: LEO ---------- */
   function launchFromLatLon(latDeg, lonDeg, {
     orbitAlt = 0.8,
     azimuthDeg = 90,
     durationAscent = 200,
     color = 0xff9955,
     label = 'Launch',
-    orbitPeriodSec = null,   // override orbit period
-    ascentSpeedScale = 1.0,  // per-launch ascent slowdown (>1 slower)
+    orbitPeriodSec = null,
+    ascentSpeedScale = 1.0,
+    astronauts = undefined,
+    description = undefined,
   } = {}) {
     const frame = surfaceFrameFromLatLon(latDeg, lonDeg);
     const { A, B, C, center } = planAscent(frame, { orbitAlt, azimuthDeg });
@@ -227,20 +218,88 @@ export function installRocketModule({
     rocket.position.copy(A);
     scene.add(rocket);
 
-    const id = nextId++;
+    if (pickManager?.register) {
+      const whoList = Array.isArray(astronauts) ? astronauts : (astronauts ? [String(astronauts)] : []);
+      const who = whoList.join(', ');
+      const meta = {
+        kind: 'rocket',
+        title: label || 'Launch Vehicle',
+        subtitle: [who, description].filter(Boolean).join(' — ') || 'Ascent',
+        astronauts: whoList, // <— explicit field for HUDs that render key/value blocks
+        description,
+        lat: latDeg, lon: lonDeg, id: null
+      };
+      rocket.userData.meta = meta; pickManager.register(rocket, meta);
+    }
+
+    const id = nextId++; if (rocket.userData?.meta) rocket.userData.meta.id = id;
     const effDuration = Math.max(1, durationAscent * ascentSlowdown * ascentSpeedScale);
 
     rockets.push({
-      id,
-      label, color,
-      phase: 'ASCENT',
+      id, label, color, phase:'ASCENT',
       A, B, C, center,
       line, positions, rocket,
-      startMs: null,
-      endMs: null,
+      startMs:null, endMs:null,
       durationAscent: effDuration,
-      orbit: null, ring: null, orbitPeriodSec,
-      lockQuat: null
+      orbit:null, ring:null, orbitPeriodSec,
+      lockQuat:null
+    });
+    return id;
+  }
+
+  /* ---------- public: direct TLI (no LEO) ---------- */
+  function launchToMoonFromLatLon(latDeg, lonDeg, {
+    azimuthDeg = 90,
+    durationAscent = 200,
+    ascentSpeedScale = 1.0,
+    transferSeconds = 3 * 24 * 3600,
+    followSeconds = 5,
+    color = 0x66c2ff,
+    label = 'TLI',
+    astronauts = undefined,
+    description = 'Trans-lunar injection',
+  } = {}) {
+    const frame = surfaceFrameFromLatLon(latDeg, lonDeg);
+    const ascent = planAscent(frame, { orbitAlt: 1.6, azimuthDeg });
+
+    const line = makeAscentLine(color);
+    const positions = line.geometry.attributes.position.array;
+
+    const rocket = createSpaceshipMesh();
+    rocket.visible = false;
+    rocket.position.copy(ascent.A);
+    scene.add(rocket);
+
+    if (pickManager?.register) {
+      const whoList = Array.isArray(astronauts) ? astronauts : (astronauts ? [String(astronauts)] : []);
+      const who = whoList.join(', ');
+      const meta = {
+        kind: 'rocket',
+        title: label || 'TLI Vehicle',
+        subtitle: ['Trans-lunar injection', who, description].filter(Boolean).join(' • '),
+        astronauts: whoList, // <— explicit field
+        description,
+        lat: latDeg, lon: lonDeg, id: null
+      };
+      rocket.userData.meta = meta; pickManager.register(rocket, meta);
+    }
+
+    const id = nextId++; if (rocket.userData?.meta) rocket.userData.meta.id = id;
+    const effAscent = Math.max(1, durationAscent * ascentSlowdown * ascentSpeedScale);
+
+    rockets.push({
+      id, label, color,
+      phase:'ASCENT_TLI',
+      A:ascent.A, B:ascent.B, C:ascent.C,
+      line, positions, rocket,
+      startMs:null, endMs:null,
+      durationAscent: effAscent,
+      tli:null,
+      transferSeconds: Math.max(60, transferSeconds),
+      followSeconds: Math.max(0.1, followSeconds),
+      lockQuat:null,
+      moonPositionFn,
+      follow:null
     });
     return id;
   }
@@ -252,8 +311,10 @@ export function installRocketModule({
     prevSimMs = nowMs;
 
     // timed deletions
-    while (deleteQueue.length && deleteQueue[0].atMs <= nowMs) {
+    let guard = 0;
+    while (deleteQueue.length && deleteQueue[0].atMs <= nowMs && guard++ < 1000) {
       const job = deleteQueue.shift();
+      if (!job) continue;
       if (job.id == null) deleteAll(); else deleteById(job.id);
     }
 
@@ -261,16 +322,10 @@ export function installRocketModule({
       const r = rockets[i];
 
       if (r.phase === 'ASCENT') {
-        if (r.startMs == null) {
-          r.startMs = nowMs;
-          r.endMs   = r.startMs + r.durationAscent * 1000;
-        }
-
+        if (r.startMs == null) { r.startMs = nowMs; r.endMs = r.startMs + r.durationAscent * 1000; }
         const raw = (nowMs - r.startMs) / (r.endMs - r.startMs);
         const te  = smoother(raw);
-
         if (!r._shown) { r._shown = true; r.rocket.visible = true; }
-
         const pos = quadPoint(r.A, r.B, r.C, te);
         const tan = quadTangent(r.A, r.B, r.C, te);
         r.rocket.position.copy(pos);
@@ -280,19 +335,18 @@ export function installRocketModule({
         for (let k = 0; k <= steps; k++) {
           const u = te * (k / steps);
           const p = quadPoint(r.A, r.B, r.C, u);
-          const j = k * 3; r.positions[j] = p.x; r.positions[j+1] = p.y; r.positions[j+2] = p.z;
+          const j = k*3; r.positions[j]=p.x; r.positions[j+1]=p.y; r.positions[j+2]=p.z;
         }
         r.line.geometry.setDrawRange(0, steps + 1);
         r.line.geometry.attributes.position.needsUpdate = true;
 
         if (raw >= 1) {
-          // smooth handoff at apex
           const center = r.center.clone();
           const rvec   = r.C.clone().sub(center);
           const R      = rvec.length();
           const radial = rvec.clone().divideScalar(R);
 
-          const tEnd      = quadTangent(r.A, r.B, r.C, 1);
+          const tEnd = quadTangent(r.A, r.B, r.C, 1);
           let tangentProj = tEnd.clone().sub(radial.clone().multiplyScalar(tEnd.dot(radial)));
           if (tangentProj.lengthSq() < 1e-10) {
             const up = new THREE.Vector3(0,1,0).applyQuaternion(earth.getWorldQuaternion(new THREE.Quaternion()));
@@ -300,36 +354,167 @@ export function installRocketModule({
           }
           const tangent = tangentProj.normalize();
 
-          r.lockQuat = r.rocket.quaternion.clone(); // keep attitude steady in orbit
+          r.lockQuat = r.rocket.quaternion.clone();
 
           const baseT = r.orbitPeriodSec ?? orbitPeriodGuess(R);
           const omega = (2*Math.PI) / (baseT * orbitSlowdown);
 
-          r.orbit = { center, R, radial, tangent, theta: 0, omega };
+          r.orbit = { center, R, radial, tangent, theta:0, omega };
           r.ring  = createOrbitRing(center, radial, tangent, R, 0x888888, 128);
           r.phase = 'ORBIT';
+          if (r.rocket?.userData?.meta) {
+            const m = r.rocket.userData.meta;
+            const who = Array.isArray(m.astronauts) ? m.astronauts.join(', ') : '';
+            r.rocket.userData.meta.subtitle = ['In orbit', who, m.description].filter(Boolean).join(' • ');
+          }
           if (r.line) r.line.material.opacity = 0.55;
         }
+      }
 
-      } else if (r.phase === 'ORBIT' && r.orbit) {
+      else if (r.phase === 'ORBIT' && r.orbit) {
         r.orbit.theta += r.orbit.omega * dt;
         const c = Math.cos(r.orbit.theta), s = Math.sin(r.orbit.theta);
-
         const p = r.orbit.center.clone()
           .add(r.orbit.radial.clone().multiplyScalar(c * r.orbit.R))
           .add(r.orbit.tangent.clone().multiplyScalar(s * r.orbit.R));
-
         r.rocket.position.copy(p);
-
-        // lock orientation in orbit
         if (r.lockQuat) r.rocket.quaternion.copy(r.lockQuat);
 
-        // fade ascent trail
         if (r.line) {
           r.line.material.opacity *= 0.985;
           if (r.line.material.opacity < 0.05) {
             scene.remove(r.line); r.line.geometry.dispose(); r.line.material.dispose(); r.line = null;
           }
+        }
+      }
+
+      else if (r.phase === 'ASCENT_TLI') {
+        if (r.startMs == null) { r.startMs = nowMs; r.endMs = r.startMs + r.durationAscent * 1000; }
+        const raw = (nowMs - r.startMs) / (r.endMs - r.startMs);
+        const te  = smoother(raw);
+        if (!r._shown) { r._shown = true; r.rocket.visible = true; }
+        const pos = quadPoint(r.A, r.B, r.C, te);
+        const tan = quadTangent(r.A, r.B, r.C, te);
+        r.rocket.position.copy(pos);
+        r.rocket.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), tan);
+
+        const steps = Math.max(2, Math.floor(te * ARC_SEGS));
+        for (let k = 0; k <= steps; k++) {
+          const u = te * (k / steps);
+          const p = quadPoint(r.A, r.B, r.C, u);
+          const j = k*3; r.positions[j]=p.x; r.positions[j+1]=p.y; r.positions[j+2]=p.z;
+        }
+        r.line.geometry.setDrawRange(0, steps + 1);
+        r.line.geometry.attributes.position.needsUpdate = true;
+
+        if (raw >= 1) {
+          const start = r.C.clone();
+          const center = earth.getWorldPosition(new THREE.Vector3());
+          const radial = start.clone().sub(center).normalize();
+          const tEnd   = quadTangent(r.A, r.B, r.C, 1);
+          const tangent = tEnd.clone().sub(radial.clone().multiplyScalar(tEnd.dot(radial))).normalize();
+
+          const moonNow = r.moonPositionFn?.();
+          const end  = moonNow ? moonNow.clone() : start.clone().add(tangent.clone().multiplyScalar(8.0));
+          const C1   = start.clone().add(radial.clone().multiplyScalar(2.0)).add(tangent.clone().multiplyScalar(3.0));
+          const toM  = end.clone().sub(start);
+          const side = toM.clone().cross(radial).setLength(1.5);
+          const C2   = start.clone().add(toM.clone().multiplyScalar(0.75)).add(side);
+
+          const transferMs = r.transferSeconds * 1000;
+          r.tli = { start, C1, C2, end, t0: nowMs, transferMs };
+          r.lockQuat = r.rocket.quaternion.clone();
+          if (r.rocket?.userData?.meta) r.rocket.userData.meta.subtitle = 'Trans-lunar coast';
+          r.phase = 'TLI';
+          if (r.line) r.line.material.opacity = 0.75;
+        }
+      }
+
+      else if (r.phase === 'TLI' && r.tli) {
+        const moonNow = r.moonPositionFn?.();
+        if (moonNow) r.tli.end.copy(moonNow);
+
+        const t = clamp01((nowMs - r.tli.t0) / r.tli.transferMs);
+        const omt = 1 - t;
+
+        const p = r.tli.start.clone().multiplyScalar(omt*omt*omt)
+          .add(r.tli.C1.clone().multiplyScalar(3*omt*omt*t))
+          .add(r.tli.C2.clone().multiplyScalar(3*omt*t*t))
+          .add(r.tli.end.clone().multiplyScalar(t*t*t));
+
+        const dp = r.tli.C1.clone().sub(r.tli.start).multiplyScalar(3*omt*omt)
+          .add(r.tli.C2.clone().sub(r.tli.C1).multiplyScalar(6*omt*t))
+          .add(r.tli.end.clone().sub(r.tli.C2).multiplyScalar(3*t*t)).normalize();
+
+        r.rocket.position.copy(p);
+        if (r.lockQuat) r.rocket.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dp);
+
+        const steps = Math.max(2, Math.floor(t * ARC_SEGS));
+        for (let k = 0; k <= steps; k++) {
+          const u = t * (k / steps);
+          const omu = 1 - u;
+          const pp = r.tli.start.clone().multiplyScalar(omu*omu*omu)
+            .add(r.tli.C1.clone().multiplyScalar(3*omu*omu*u))
+            .add(r.tli.C2.clone().multiplyScalar(3*omu*u*u))
+            .add(r.tli.end.clone().multiplyScalar(u*u*u));
+          const j = k*3; r.positions[j]=pp.x; r.positions[j+1]=pp.y; r.positions[j+2]=pp.z;
+        }
+        r.line.geometry.setDrawRange(0, steps + 1);
+        r.line.geometry.attributes.position.needsUpdate = true;
+
+        if (t >= 1) {
+          const moonP = r.moonPositionFn?.() ?? r.tli.end.clone();
+          const center = moonP.clone();
+
+          // small circular path around the Moon
+          const R = 0.9;
+          let up = new THREE.Vector3(0, 1, 0);
+          let radial = new THREE.Vector3(1, 0, 0);
+          if (Math.abs(up.dot(radial)) > 0.95) radial.set(0, 0, 1);
+          const u = up.clone().cross(radial).normalize();
+          const v = radial.clone().cross(u).normalize();
+          const periodSec = 10.0;
+          const omega = (2*Math.PI) / periodSec;
+
+          r.follow = {
+            mode: 'LUNAR_ORBIT',
+            center, u, v, R,
+            theta: 0,
+            omega,
+            t0: nowMs,
+            t1: nowMs + (r.followSeconds ?? 5) * 1000,
+          };
+          r.phase = 'FOLLOW_MOON';
+          if (r.rocket?.userData?.meta) {
+            const m = r.rocket.userData.meta;
+            const who = Array.isArray(m.astronauts) ? m.astronauts.join(', ') : '';
+            r.rocket.userData.meta.subtitle = ['Lunar orbit', who, m.description].filter(Boolean).join(' • ');
+          }
+        }
+      }
+
+      else if (r.phase === 'FOLLOW_MOON' && r.follow) {
+        const moonNow = r.moonPositionFn?.();
+        if (moonNow) r.follow.center.copy(moonNow);
+
+        r.follow.theta += r.follow.omega * dt;
+        const c = Math.cos(r.follow.theta), s = Math.sin(r.follow.theta);
+        const pos = r.follow.center.clone()
+          .add(r.follow.u.clone().multiplyScalar(c * r.follow.R))
+          .add(r.follow.v.clone().multiplyScalar(s * r.follow.R));
+        r.rocket.position.copy(pos);
+        if (r.lockQuat) r.rocket.quaternion.copy(r.lockQuat);
+
+        if (r.line) {
+          r.line.material.opacity *= 0.985;
+          if (r.line.material.opacity < 0.05) {
+            scene.remove(r.line); r.line.geometry.dispose(); r.line.material.dispose(); r.line = null;
+          }
+        }
+
+        if (nowMs >= r.follow.t1) {
+          deleteById(r.id);
+          continue;
         }
       }
     }
@@ -338,17 +523,13 @@ export function installRocketModule({
   /* ---------- API ---------- */
   return {
     launchFromLatLon,
+    launchToMoonFromLatLon,
     update,
-
-    // deletion (immediate)
     deleteById,
     deleteAll,
-
-    // timed deletion (UTC ms)
     scheduleDelete,
-
-    // runtime knobs
-    setOrbitSlowdown: (f) => { orbitSlowdown = Math.max(0.1, Number(f) || 1); },
+    scheduleDeleteAll,
+    setOrbitSlowdown:  (f) => { orbitSlowdown  = Math.max(0.1, Number(f) || 1); },
     setAscentSlowdown: (f) => { ascentSlowdown = Math.max(0.1, Number(f) || 1); },
   };
 }

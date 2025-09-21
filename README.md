@@ -38,3 +38,16 @@ kosmoscope/
 └─ README.md
 ```
 
+# How to run
+
+```
+git clone
+
+cd frontend
+
+npm install
+
+npm run dev
+
+```
+

@@ -9,6 +9,8 @@ An interactive, real-time globe for visualizing influential space launches. Watc
 - “Next Launch” — jump the simulation clock to the next queued mission.
 
 - Auto HUD — launch info appears automatically at T-0 and hides when the vehicle is removed.
+  
+- Space mission description is displayed when the rocket reaches orbit
 
 - Clickable flags — one flag per unique launch site (de-duped by rounded lat/lon), with country-specific icons:
 
